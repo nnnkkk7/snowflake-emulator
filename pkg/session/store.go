@@ -76,7 +76,6 @@ func (s *Store) Save(ctx context.Context, session *Session) error {
 		session.ExpiresAt,
 		string(paramsJSON),
 	)
-
 	if err != nil {
 		return fmt.Errorf("failed to save session: %w", err)
 	}

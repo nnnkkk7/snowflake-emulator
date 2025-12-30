@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/nnnkkk7/snowflake-emulator/pkg/config"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
@@ -113,11 +115,26 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 		{Name: string(config.ParamTimestampOutputFormat), Value: defaultParams[config.ParamTimestampOutputFormat]},
 		{Name: string(config.ParamClientSessionKeepAlive), Value: defaultParams[config.ParamClientSessionKeepAlive]},
 		{Name: string(config.ParamQueryTag), Value: defaultParams[config.ParamQueryTag]},
+		{Name: string(config.ParamGoQueryResultFormat), Value: defaultParams[config.ParamGoQueryResultFormat]},
 	}
 
 	// Add user-provided session parameters
 	for k, v := range req.Data.SessionParams {
-		parameters = append(parameters, types.ParameterBinding{Name: k, Value: v})
+		// Convert any type to string for the response
+		var strValue string
+		switch val := v.(type) {
+		case string:
+			strValue = val
+		case bool:
+			if val {
+				strValue = "true"
+			} else {
+				strValue = "false"
+			}
+		default:
+			strValue = fmt.Sprintf("%v", v)
+		}
+		parameters = append(parameters, types.ParameterBinding{Name: k, Value: strValue})
 	}
 
 	// Build success response
@@ -141,7 +158,7 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // TokenRequest handles token renewal with master token.
@@ -176,7 +193,7 @@ func (h *SessionHandler) TokenRequest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // Heartbeat handles session keep-alive requests.
@@ -201,7 +218,7 @@ func (h *SessionHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // RenewSession handles session renewal requests (legacy - delegates to TokenRequest).
@@ -232,7 +249,7 @@ func (h *SessionHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // UseContext handles USE DATABASE/SCHEMA requests.
@@ -258,7 +275,7 @@ func (h *SessionHandler) UseContext(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // sendError sends an error response using gosnowflake protocol.
@@ -272,22 +289,67 @@ func sendError(w http.ResponseWriter, err *apierror.SnowflakeError) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // Snowflake returns 200 even for errors
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// CloseSession handles DELETE /session requests from gosnowflake.
+func (h *SessionHandler) CloseSession(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r)
+	if token == "" {
+		sendError(w, apierror.NewSnowflakeError(apierror.CodeSessionNotFound, "Authorization token required"))
+		return
+	}
+
+	ctx := r.Context()
+
+	// Close session
+	if err := h.sessionMgr.CloseSession(ctx, token); err != nil {
+		// Session might already be closed, treat as success
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data":    nil,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    nil,
+	})
 }
 
 // extractToken extracts the session token from Authorization header.
+// Supports multiple formats:
+// - Snowflake Token="xxx" (gosnowflake format)
+// - Bearer xxx (standard format)
 func extractToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
 		return ""
 	}
-	// Parse "Snowflake Token="xxx""
-	if len(auth) > 17 && auth[:17] == "Snowflake Token=\"" {
-		return auth[17 : len(auth)-1]
+
+	auth = strings.TrimSpace(auth)
+
+	// Parse "Snowflake Token="xxx"" (case-insensitive for "Snowflake")
+	if len(auth) >= 17 && strings.EqualFold(auth[:10], "Snowflake ") {
+		rest := auth[10:]
+		if strings.HasPrefix(rest, "Token=\"") && strings.HasSuffix(rest, "\"") {
+			return rest[7 : len(rest)-1]
+		}
+		// Handle without quotes: Snowflake Token=xxx
+		if strings.HasPrefix(rest, "Token=") {
+			return rest[6:]
+		}
 	}
-	// Also support simple "Bearer xxx" format
-	if len(auth) > 7 && auth[:7] == "Bearer " {
-		return auth[7:]
+
+	// Parse "Bearer xxx" (case-insensitive)
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		return strings.TrimSpace(auth[7:])
 	}
+
 	return ""
 }

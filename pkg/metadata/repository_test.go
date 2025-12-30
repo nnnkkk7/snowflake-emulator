@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -246,5 +247,238 @@ func TestRepository_GetDatabaseByName(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRepository_QueryHistory tests query history operations.
+func TestRepository_QueryHistory(t *testing.T) {
+	repo := setupTestRepository(t)
+	ctx := context.Background()
+
+	t.Run("RecordQueryStart", func(t *testing.T) {
+		entry, err := repo.RecordQueryStart(ctx, "session-1", "query-1", "SELECT 1")
+		if err != nil {
+			t.Fatalf("RecordQueryStart() error = %v", err)
+		}
+
+		if entry.ID == "" {
+			t.Error("expected non-empty ID")
+		}
+		if entry.SessionID != "session-1" {
+			t.Errorf("expected SessionID 'session-1', got %s", entry.SessionID)
+		}
+		if entry.QueryID != "query-1" {
+			t.Errorf("expected QueryID 'query-1', got %s", entry.QueryID)
+		}
+		if entry.SQLText != "SELECT 1" {
+			t.Errorf("expected SQLText 'SELECT 1', got %s", entry.SQLText)
+		}
+		if entry.Status != "RUNNING" {
+			t.Errorf("expected Status 'RUNNING', got %s", entry.Status)
+		}
+	})
+
+	t.Run("RecordQuerySuccess", func(t *testing.T) {
+		entry, err := repo.RecordQueryStart(ctx, "session-2", "query-2", "SELECT * FROM test")
+		if err != nil {
+			t.Fatalf("RecordQueryStart() error = %v", err)
+		}
+
+		err = repo.RecordQuerySuccess(ctx, entry.ID, 10, 150)
+		if err != nil {
+			t.Fatalf("RecordQuerySuccess() error = %v", err)
+		}
+
+		// Verify via GetQueryHistory
+		history, err := repo.GetQueryHistory(ctx, 10)
+		if err != nil {
+			t.Fatalf("GetQueryHistory() error = %v", err)
+		}
+
+		var found *QueryHistoryEntry
+		for _, e := range history {
+			if e.ID == entry.ID {
+				found = e
+				break
+			}
+		}
+
+		if found == nil {
+			t.Fatal("entry not found in history")
+		}
+		if found.Status != "SUCCESS" {
+			t.Errorf("expected Status 'SUCCESS', got %s", found.Status)
+		}
+		if found.RowsAffected != 10 {
+			t.Errorf("expected RowsAffected 10, got %d", found.RowsAffected)
+		}
+		if found.ExecutionTimeMs != 150 {
+			t.Errorf("expected ExecutionTimeMs 150, got %d", found.ExecutionTimeMs)
+		}
+		if found.CompletedAt == nil {
+			t.Error("expected CompletedAt to be set")
+		}
+	})
+
+	t.Run("RecordQueryFailure", func(t *testing.T) {
+		entry, err := repo.RecordQueryStart(ctx, "session-3", "query-3", "SELECT * FROM nonexistent")
+		if err != nil {
+			t.Fatalf("RecordQueryStart() error = %v", err)
+		}
+
+		err = repo.RecordQueryFailure(ctx, entry.ID, "Table not found", 50)
+		if err != nil {
+			t.Fatalf("RecordQueryFailure() error = %v", err)
+		}
+
+		// Verify via GetQueryHistory
+		history, err := repo.GetQueryHistory(ctx, 10)
+		if err != nil {
+			t.Fatalf("GetQueryHistory() error = %v", err)
+		}
+
+		var found *QueryHistoryEntry
+		for _, e := range history {
+			if e.ID == entry.ID {
+				found = e
+				break
+			}
+		}
+
+		if found == nil {
+			t.Fatal("entry not found in history")
+		}
+		if found.Status != "FAILED" {
+			t.Errorf("expected Status 'FAILED', got %s", found.Status)
+		}
+		if found.ErrorMessage != "Table not found" {
+			t.Errorf("expected ErrorMessage 'Table not found', got %s", found.ErrorMessage)
+		}
+		if found.ExecutionTimeMs != 50 {
+			t.Errorf("expected ExecutionTimeMs 50, got %d", found.ExecutionTimeMs)
+		}
+	})
+}
+
+// TestRepository_GetQueryHistoryBySession tests session-specific query history.
+func TestRepository_GetQueryHistoryBySession(t *testing.T) {
+	repo := setupTestRepository(t)
+	ctx := context.Background()
+
+	// Create entries for different sessions
+	_, err := repo.RecordQueryStart(ctx, "session-a", "query-1", "SELECT 1")
+	if err != nil {
+		t.Fatalf("RecordQueryStart() error = %v", err)
+	}
+
+	_, err = repo.RecordQueryStart(ctx, "session-a", "query-2", "SELECT 2")
+	if err != nil {
+		t.Fatalf("RecordQueryStart() error = %v", err)
+	}
+
+	_, err = repo.RecordQueryStart(ctx, "session-b", "query-3", "SELECT 3")
+	if err != nil {
+		t.Fatalf("RecordQueryStart() error = %v", err)
+	}
+
+	// Get history for session-a
+	history, err := repo.GetQueryHistoryBySession(ctx, "session-a", 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistoryBySession() error = %v", err)
+	}
+
+	if len(history) != 2 {
+		t.Errorf("expected 2 entries for session-a, got %d", len(history))
+	}
+
+	for _, entry := range history {
+		if entry.SessionID != "session-a" {
+			t.Errorf("expected SessionID 'session-a', got %s", entry.SessionID)
+		}
+	}
+
+	// Get history for session-b
+	history, err = repo.GetQueryHistoryBySession(ctx, "session-b", 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistoryBySession() error = %v", err)
+	}
+
+	if len(history) != 1 {
+		t.Errorf("expected 1 entry for session-b, got %d", len(history))
+	}
+}
+
+// TestRepository_ClearQueryHistory tests clearing old query history.
+func TestRepository_ClearQueryHistory(t *testing.T) {
+	repo := setupTestRepository(t)
+	ctx := context.Background()
+
+	// Create some entries
+	_, err := repo.RecordQueryStart(ctx, "session-1", "query-1", "SELECT 1")
+	if err != nil {
+		t.Fatalf("RecordQueryStart() error = %v", err)
+	}
+
+	_, err = repo.RecordQueryStart(ctx, "session-1", "query-2", "SELECT 2")
+	if err != nil {
+		t.Fatalf("RecordQueryStart() error = %v", err)
+	}
+
+	// Wait a bit to ensure time difference
+	time.Sleep(10 * time.Millisecond)
+
+	// Clear entries older than now (should clear all)
+	futureTime := time.Now().Add(time.Hour)
+	deleted, err := repo.ClearQueryHistory(ctx, futureTime)
+	if err != nil {
+		t.Fatalf("ClearQueryHistory() error = %v", err)
+	}
+
+	if deleted != 2 {
+		t.Errorf("expected 2 deleted entries, got %d", deleted)
+	}
+
+	// Verify history is empty
+	history, err := repo.GetQueryHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistory() error = %v", err)
+	}
+
+	if len(history) != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", len(history))
+	}
+}
+
+// TestRepository_GetQueryHistory_Limit tests the limit parameter.
+func TestRepository_GetQueryHistory_Limit(t *testing.T) {
+	repo := setupTestRepository(t)
+	ctx := context.Background()
+
+	// Create 5 entries
+	for i := 0; i < 5; i++ {
+		_, err := repo.RecordQueryStart(ctx, "session-1", "query-"+string(rune('1'+i)), "SELECT "+string(rune('1'+i)))
+		if err != nil {
+			t.Fatalf("RecordQueryStart() error = %v", err)
+		}
+	}
+
+	// Get with limit 3
+	history, err := repo.GetQueryHistory(ctx, 3)
+	if err != nil {
+		t.Fatalf("GetQueryHistory() error = %v", err)
+	}
+
+	if len(history) != 3 {
+		t.Errorf("expected 3 entries with limit, got %d", len(history))
+	}
+
+	// Get with default limit (0 means 100)
+	history, err = repo.GetQueryHistory(ctx, 0)
+	if err != nil {
+		t.Fatalf("GetQueryHistory() error = %v", err)
+	}
+
+	if len(history) != 5 {
+		t.Errorf("expected 5 entries with default limit, got %d", len(history))
 	}
 }

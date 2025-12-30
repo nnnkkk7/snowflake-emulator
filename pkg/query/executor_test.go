@@ -90,7 +90,7 @@ func TestExecutor_ExecuteQuery(t *testing.T) {
 }
 
 // TestExecutor_ExecuteWithTranslation tests query execution with Snowflake SQL translation.
-func TestExecutor_ExecuteWithTranslation(t *testing.T) {
+func TestExecutor_ExecuteWithTranslation(t *testing.T) { //nolint:gocyclo // Test covers multiple execution cases
 	executor, repo := setupTestExecutor(t)
 	ctx := context.Background()
 
@@ -319,5 +319,374 @@ func TestExecutor_GetColumnInfo(t *testing.T) {
 	expectedColumns := []string{"ID", "NAME", "SALARY"}
 	if diff := cmp.Diff(expectedColumns, result.Columns); diff != "" {
 		t.Errorf("Column names mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestExecutor_QueryWithBindings tests query execution with parameter bindings.
+func TestExecutor_QueryWithBindings(t *testing.T) {
+	executor, _ := setupTestExecutor(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name         string
+		sql          string
+		bindings     map[string]*BindingValue
+		expectedRows int
+		checkValue   func(t *testing.T, rows [][]interface{})
+	}{
+		{
+			name: "IntegerBinding",
+			sql:  "SELECT :1 AS num",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "FIXED", Value: "42"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != int64(42) && rows[0][0] != int32(42) {
+					t.Errorf("Expected 42, got %v (type: %T)", rows[0][0], rows[0][0])
+				}
+			},
+		},
+		{
+			name: "TextBinding",
+			sql:  "SELECT :1 AS name",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "TEXT", Value: "Hello World"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != "Hello World" {
+					t.Errorf("Expected 'Hello World', got %v", rows[0][0])
+				}
+			},
+		},
+		{
+			name: "MultipleBindings",
+			sql:  "SELECT :1 AS a, :2 AS b, :3 AS c",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "FIXED", Value: "1"},
+				"2": {Type: "TEXT", Value: "test"},
+				"3": {Type: "REAL", Value: "3.14"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if len(rows[0]) != 3 {
+					t.Errorf("Expected 3 columns, got %d", len(rows[0]))
+				}
+			},
+		},
+		{
+			name: "BooleanBindingTrue",
+			sql:  "SELECT :1 AS flag",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "BOOLEAN", Value: "true"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != true {
+					t.Errorf("Expected true, got %v", rows[0][0])
+				}
+			},
+		},
+		{
+			name: "BooleanBindingFalse",
+			sql:  "SELECT :1 AS flag",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "BOOLEAN", Value: "false"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != false {
+					t.Errorf("Expected false, got %v", rows[0][0])
+				}
+			},
+		},
+		{
+			name: "TextWithSpecialChars",
+			sql:  "SELECT :1 AS text",
+			bindings: map[string]*BindingValue{
+				"1": {Type: "TEXT", Value: "hello-world_123"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != "hello-world_123" {
+					t.Errorf("Expected 'hello-world_123', got %v", rows[0][0])
+				}
+			},
+		},
+		{
+			name:         "NoBindings",
+			sql:          "SELECT 1 AS num",
+			bindings:     nil,
+			expectedRows: 1,
+		},
+		{
+			name:         "EmptyBindings",
+			sql:          "SELECT 1 AS num",
+			bindings:     map[string]*BindingValue{},
+			expectedRows: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := executor.QueryWithBindings(ctx, tt.sql, tt.bindings)
+			if err != nil {
+				t.Fatalf("QueryWithBindings() error = %v", err)
+			}
+
+			if len(result.Rows) != tt.expectedRows {
+				t.Errorf("Expected %d rows, got %d", tt.expectedRows, len(result.Rows))
+			}
+
+			if tt.checkValue != nil && len(result.Rows) > 0 {
+				tt.checkValue(t, result.Rows)
+			}
+		})
+	}
+}
+
+// TestFormatBindingValue tests the formatBindingValue helper function.
+func TestFormatBindingValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		binding  *BindingValue
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "NilBinding",
+			binding:  nil,
+			expected: "NULL",
+		},
+		{
+			name:     "TextValue",
+			binding:  &BindingValue{Type: "TEXT", Value: "hello"},
+			expected: "'hello'",
+		},
+		{
+			name:     "TextWithQuotes",
+			binding:  &BindingValue{Type: "TEXT", Value: "it's"},
+			expected: "'it''s'",
+		},
+		{
+			name:     "IntegerValue",
+			binding:  &BindingValue{Type: "FIXED", Value: "123"},
+			expected: "123",
+		},
+		{
+			name:     "RealValue",
+			binding:  &BindingValue{Type: "REAL", Value: "3.14"},
+			expected: "3.14",
+		},
+		{
+			name:     "BooleanTrue",
+			binding:  &BindingValue{Type: "BOOLEAN", Value: "true"},
+			expected: "TRUE",
+		},
+		{
+			name:     "BooleanFalse",
+			binding:  &BindingValue{Type: "BOOLEAN", Value: "false"},
+			expected: "FALSE",
+		},
+		{
+			name:     "DateValue",
+			binding:  &BindingValue{Type: "DATE", Value: "2024-01-15"},
+			expected: "DATE '2024-01-15'",
+		},
+		{
+			name:     "TimestampValue",
+			binding:  &BindingValue{Type: "TIMESTAMP", Value: "2024-01-15 10:30:00"},
+			expected: "TIMESTAMP '2024-01-15 10:30:00'",
+		},
+		{
+			name:     "NullType",
+			binding:  &BindingValue{Type: "NULL", Value: ""},
+			expected: "NULL",
+		},
+		{
+			name:    "InvalidInteger",
+			binding: &BindingValue{Type: "FIXED", Value: "not a number"},
+			wantErr: true,
+		},
+		{
+			name:    "InvalidReal",
+			binding: &BindingValue{Type: "REAL", Value: "not a float"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := formatBindingValue(tt.binding)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestExecutor_TransactionStatements tests transaction control statement execution.
+func TestExecutor_TransactionStatements(t *testing.T) {
+	executor, _ := setupTestExecutor(t)
+	ctx := context.Background()
+
+	// Test BEGIN statements
+	t.Run("BEGIN", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result, got nil")
+		}
+		// Rollback to clean up
+		_, _ = executor.Execute(ctx, "ROLLBACK")
+	})
+
+	t.Run("BEGIN_TRANSACTION", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "BEGIN TRANSACTION")
+		if err != nil {
+			t.Fatalf("BEGIN TRANSACTION failed: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result, got nil")
+		}
+		// Rollback to clean up
+		_, _ = executor.Execute(ctx, "ROLLBACK")
+	})
+
+	t.Run("START_TRANSACTION", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "START TRANSACTION")
+		if err != nil {
+			t.Fatalf("START TRANSACTION failed: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result, got nil")
+		}
+		// Rollback to clean up
+		_, _ = executor.Execute(ctx, "ROLLBACK")
+	})
+
+	// Test COMMIT - requires active transaction
+	t.Run("COMMIT", func(t *testing.T) {
+		// First start a transaction
+		_, err := executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+
+		result, err := executor.Execute(ctx, "COMMIT")
+		if err != nil {
+			t.Fatalf("COMMIT failed: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result, got nil")
+		}
+	})
+
+	// Test ROLLBACK - requires active transaction
+	t.Run("ROLLBACK", func(t *testing.T) {
+		// First start a transaction
+		_, err := executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+
+		result, err := executor.Execute(ctx, "ROLLBACK")
+		if err != nil {
+			t.Fatalf("ROLLBACK failed: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result, got nil")
+		}
+	})
+
+	// Test full transaction workflow with data
+	t.Run("FullTransactionWorkflow", func(t *testing.T) {
+		// Create a test table
+		_, err := executor.Execute(ctx, "CREATE TABLE IF NOT EXISTS tx_test (id INTEGER)")
+		if err != nil {
+			t.Fatalf("CREATE TABLE failed: %v", err)
+		}
+
+		// Begin transaction
+		_, err = executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+
+		// Insert data
+		_, err = executor.Execute(ctx, "INSERT INTO tx_test VALUES (1)")
+		if err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+
+		// Commit
+		_, err = executor.Execute(ctx, "COMMIT")
+		if err != nil {
+			t.Fatalf("COMMIT failed: %v", err)
+		}
+
+		// Verify data was committed
+		result, err := executor.Query(ctx, "SELECT * FROM tx_test WHERE id = 1")
+		if err != nil {
+			t.Fatalf("SELECT failed: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Errorf("Expected 1 row after commit, got %d", len(result.Rows))
+		}
+
+		// Clean up
+		_, _ = executor.Execute(ctx, "DROP TABLE tx_test")
+	})
+}
+
+// TestTransactionClassifier tests transaction statement classification.
+func TestTransactionClassifier(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		isTransaction bool
+		isBegin       bool
+		isCommit      bool
+		isRollback    bool
+	}{
+		{"BEGIN", "BEGIN", true, true, false, false},
+		{"BEGIN_TRANSACTION", "BEGIN TRANSACTION", true, true, false, false},
+		{"START_TRANSACTION", "START TRANSACTION", true, true, false, false},
+		{"COMMIT", "COMMIT", true, false, true, false},
+		{"ROLLBACK", "ROLLBACK", true, false, false, true},
+		{"SELECT", "SELECT 1", false, false, false, false},
+		{"INSERT", "INSERT INTO t VALUES (1)", false, false, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTransaction(tt.sql); got != tt.isTransaction {
+				t.Errorf("IsTransaction(%q) = %v, want %v", tt.sql, got, tt.isTransaction)
+			}
+			if got := IsBegin(tt.sql); got != tt.isBegin {
+				t.Errorf("IsBegin(%q) = %v, want %v", tt.sql, got, tt.isBegin)
+			}
+			if got := IsCommit(tt.sql); got != tt.isCommit {
+				t.Errorf("IsCommit(%q) = %v, want %v", tt.sql, got, tt.isCommit)
+			}
+			if got := IsRollback(tt.sql); got != tt.isRollback {
+				t.Errorf("IsRollback(%q) = %v, want %v", tt.sql, got, tt.isRollback)
+			}
+		})
 	}
 }

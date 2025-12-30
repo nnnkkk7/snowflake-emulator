@@ -3,22 +3,38 @@ package query
 import (
 	"context"
 	"fmt"
+	"log"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
+	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
+
+// BindingValue represents a parameter binding value for SQL queries.
+// This mirrors the REST API v2 binding format.
+type BindingValue struct {
+	Type  string // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
+	Value string // String representation of the value
+}
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
 type Executor struct {
-	mgr        *connection.Manager
-	repo       *metadata.Repository
-	translator *Translator
+	mgr         *connection.Manager
+	repo        *metadata.Repository
+	translator  *Translator
+	copyHandler *CopyHandler
 }
 
-// QueryResult represents the result of a query execution.
-type QueryResult struct {
-	Columns []string
-	Rows    [][]interface{}
+// Result represents the result of a query execution.
+type Result struct {
+	Columns     []string
+	ColumnTypes []types.ColumnMetadata
+	Rows        [][]interface{}
 }
 
 // ExecResult represents the result of a non-query execution (INSERT, UPDATE, DELETE, etc.).
@@ -35,8 +51,13 @@ func NewExecutor(mgr *connection.Manager, repo *metadata.Repository) *Executor {
 	}
 }
 
+// SetCopyHandler sets the COPY handler for executing COPY INTO statements.
+func (e *Executor) SetCopyHandler(handler *CopyHandler) {
+	e.copyHandler = handler
+}
+
 // Query executes a SELECT query and returns results.
-func (e *Executor) Query(ctx context.Context, sql string) (*QueryResult, error) {
+func (e *Executor) Query(ctx context.Context, sql string) (*Result, error) {
 	// Translate Snowflake SQL to DuckDB SQL
 	translatedSQL, err := e.translator.Translate(sql)
 	if err != nil {
@@ -48,13 +69,16 @@ func (e *Executor) Query(ctx context.Context, sql string) (*QueryResult, error) 
 	if err != nil {
 		return nil, fmt.Errorf("query execution error: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
+
+	// Capture column types before iterating (using TypeMapper)
+	columnTypes := InferColumnMetadata(columns, rows)
 
 	// Fetch all rows
 	var resultRows [][]interface{}
@@ -83,10 +107,148 @@ func (e *Executor) Query(ctx context.Context, sql string) (*QueryResult, error) 
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	return &QueryResult{
-		Columns: columns,
-		Rows:    resultRows,
+	return &Result{
+		Columns:     columns,
+		ColumnTypes: columnTypes,
+		Rows:        resultRows,
 	}, nil
+}
+
+// QueryWithBindings executes a SELECT query with parameter bindings and returns results.
+// Bindings are keyed by position (e.g., "1", "2", "3") and replace :1, :2, :3 placeholders.
+func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings map[string]*BindingValue) (*Result, error) {
+	if len(bindings) == 0 {
+		return e.Query(ctx, sql)
+	}
+
+	// Replace binding placeholders with actual values
+	boundSQL, err := e.applyBindings(sql, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("binding error: %w", err)
+	}
+
+	return e.Query(ctx, boundSQL)
+}
+
+// applyBindings replaces :N placeholders with actual values from bindings.
+// Snowflake uses :1, :2, etc. for positional parameters.
+func (e *Executor) applyBindings(sql string, bindings map[string]*BindingValue) (string, error) {
+	// Get binding keys sorted in descending order to avoid :1 replacing :10, :11, etc.
+	keys := make([]int, 0, len(bindings))
+	for k := range bindings {
+		pos, err := strconv.Atoi(k)
+		if err != nil {
+			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
+		}
+		keys = append(keys, pos)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
+
+	result := sql
+	for _, pos := range keys {
+		key := strconv.Itoa(pos)
+		binding := bindings[key]
+		if binding == nil {
+			continue
+		}
+
+		placeholder := ":" + key
+		value, err := formatBindingValue(binding)
+		if err != nil {
+			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
+		}
+
+		result = strings.ReplaceAll(result, placeholder, value)
+	}
+
+	// Also handle ? placeholders (positional, 1-based)
+	result = e.replaceQuestionMarkPlaceholders(result, bindings)
+
+	return result, nil
+}
+
+// replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
+func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*BindingValue) string {
+	// Find all ? placeholders
+	re := regexp.MustCompile(`\?`)
+	matches := re.FindAllStringIndex(sql, -1)
+	if len(matches) == 0 {
+		return sql
+	}
+
+	// Replace from end to start to preserve indices
+	result := sql
+	for i := len(matches) - 1; i >= 0; i-- {
+		key := strconv.Itoa(i + 1) // 1-based
+		binding := bindings[key]
+		if binding == nil {
+			continue
+		}
+
+		value, err := formatBindingValue(binding)
+		if err != nil {
+			continue // Skip on error
+		}
+
+		start := matches[i][0]
+		end := matches[i][1]
+		result = result[:start] + value + result[end:]
+	}
+
+	return result
+}
+
+// formatBindingValue formats a binding value for SQL substitution.
+func formatBindingValue(b *BindingValue) (string, error) {
+	if b == nil {
+		return ValueNull, nil
+	}
+
+	switch strings.ToUpper(b.Type) {
+	case TypeText, "VARCHAR", "STRING":
+		// Escape single quotes and wrap in quotes
+		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		return "'" + escaped + "'", nil
+
+	case "FIXED", "INTEGER", "BIGINT", "SMALLINT", "TINYINT":
+		// Validate it's a number
+		if _, err := strconv.ParseInt(b.Value, 10, 64); err != nil {
+			return "", fmt.Errorf("invalid integer value: %s", b.Value)
+		}
+		return b.Value, nil
+
+	case "REAL", "FLOAT", "DOUBLE", "NUMBER", "DECIMAL":
+		// Validate it's a number
+		if _, err := strconv.ParseFloat(b.Value, 64); err != nil {
+			return "", fmt.Errorf("invalid float value: %s", b.Value)
+		}
+		return b.Value, nil
+
+	case "BOOLEAN":
+		lower := strings.ToLower(b.Value)
+		if lower == "true" || lower == "1" {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
+
+	case "DATE":
+		// Validate and format as DATE
+		return "DATE '" + b.Value + "'", nil
+
+	case "TIME":
+		return "TIME '" + b.Value + "'", nil
+
+	case "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ":
+		return "TIMESTAMP '" + b.Value + "'", nil
+
+	case ValueNull:
+		return ValueNull, nil
+
+	default:
+		// Default to text treatment
+		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		return "'" + escaped + "'", nil
+	}
 }
 
 // Execute executes a non-query SQL statement (INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
@@ -102,6 +264,16 @@ func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error)
 	// For DROP TABLE, we need to remove it from metadata
 	if classifier.IsDropTable(sql) {
 		return e.executeDropTable(ctx, sql)
+	}
+
+	// Handle transaction control statements
+	if IsTransaction(sql) {
+		return e.executeTransaction(ctx, sql)
+	}
+
+	// Handle COPY INTO statements
+	if IsCopy(sql) {
+		return e.executeCopy(ctx, sql)
 	}
 
 	// Translate Snowflake SQL to DuckDB SQL
@@ -167,6 +339,74 @@ func (e *Executor) executeDropTable(ctx context.Context, sql string) (*ExecResul
 	}, nil
 }
 
+// executeTransaction handles transaction control statements (BEGIN, COMMIT, ROLLBACK).
+// DuckDB supports transactions, so we pass them through directly.
+func (e *Executor) executeTransaction(ctx context.Context, sql string) (*ExecResult, error) {
+	// DuckDB supports BEGIN, COMMIT, and ROLLBACK
+	// We execute them directly without translation
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+
+	// Normalize transaction statements for DuckDB
+	var duckDBSQL string
+	switch {
+	case strings.HasPrefix(upperSQL, "BEGIN") || strings.HasPrefix(upperSQL, "START TRANSACTION"):
+		duckDBSQL = "BEGIN TRANSACTION"
+	case strings.HasPrefix(upperSQL, "COMMIT"):
+		duckDBSQL = "COMMIT"
+	case strings.HasPrefix(upperSQL, "ROLLBACK"):
+		duckDBSQL = "ROLLBACK"
+	default:
+		return nil, fmt.Errorf("unknown transaction statement: %s", sql)
+	}
+
+	if _, err := e.mgr.Exec(ctx, duckDBSQL); err != nil {
+		return nil, fmt.Errorf("transaction error: %w", err)
+	}
+
+	return &ExecResult{
+		RowsAffected: 0,
+	}, nil
+}
+
+// executeCopy handles COPY INTO statements.
+func (e *Executor) executeCopy(ctx context.Context, sql string) (*ExecResult, error) {
+	if e.copyHandler == nil {
+		return nil, fmt.Errorf("COPY handler not configured")
+	}
+
+	// Parse the COPY statement
+	stmt, err := e.copyHandler.ParseCopyStatement(sql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse COPY statement: %w", err)
+	}
+
+	// Resolve schema ID from target database/schema names if provided
+	var schemaID string
+	if stmt.TargetDatabase != "" && stmt.TargetSchema != "" {
+		// Look up database by name
+		db, err := e.repo.GetDatabaseByName(ctx, stmt.TargetDatabase)
+		if err != nil {
+			return nil, fmt.Errorf("database %s not found: %w", stmt.TargetDatabase, err)
+		}
+		// Look up schema by name
+		schema, err := e.repo.GetSchemaByName(ctx, db.ID, stmt.TargetSchema)
+		if err != nil {
+			return nil, fmt.Errorf("schema %s not found in database %s: %w", stmt.TargetSchema, stmt.TargetDatabase, err)
+		}
+		schemaID = schema.ID
+	}
+
+	// Execute COPY INTO with resolved schema context
+	result, err := e.copyHandler.ExecuteCopyInto(ctx, stmt, schemaID)
+	if err != nil {
+		return nil, fmt.Errorf("COPY INTO failed: %w", err)
+	}
+
+	return &ExecResult{
+		RowsAffected: result.RowsLoaded,
+	}, nil
+}
+
 // convertValue converts database values to appropriate Go types.
 func convertValue(val interface{}) interface{} {
 	if val == nil {
@@ -190,4 +430,64 @@ func convertValue(val interface{}) interface{} {
 		// For other types, return as-is
 		return v
 	}
+}
+
+// ExecuteWithHistory wraps Execute with query history tracking.
+func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string) (*ExecResult, error) {
+	startTime := time.Now()
+
+	// Record query start (non-blocking on failure)
+	entry, err := e.repo.RecordQueryStart(ctx, sessionID, queryID, sql)
+	if err != nil {
+		log.Printf("Failed to record query start: %v", err)
+	}
+
+	// Execute the query
+	result, execErr := e.Execute(ctx, sql)
+
+	// Calculate execution time
+	executionTimeMs := time.Since(startTime).Milliseconds()
+
+	// Record result
+	if entry != nil {
+		if execErr != nil {
+			_ = e.repo.RecordQueryFailure(ctx, entry.ID, execErr.Error(), executionTimeMs)
+		} else {
+			_ = e.repo.RecordQuerySuccess(ctx, entry.ID, result.RowsAffected, executionTimeMs)
+		}
+	}
+
+	return result, execErr
+}
+
+// QueryWithHistory wraps Query with query history tracking.
+func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string) (*Result, error) {
+	startTime := time.Now()
+
+	// Record query start (non-blocking on failure)
+	entry, err := e.repo.RecordQueryStart(ctx, sessionID, queryID, sql)
+	if err != nil {
+		log.Printf("Failed to record query start: %v", err)
+	}
+
+	// Execute the query
+	result, execErr := e.Query(ctx, sql)
+
+	// Calculate execution time
+	executionTimeMs := time.Since(startTime).Milliseconds()
+
+	// Record result
+	if entry != nil {
+		if execErr != nil {
+			_ = e.repo.RecordQueryFailure(ctx, entry.ID, execErr.Error(), executionTimeMs)
+		} else {
+			var rowCount int64
+			if result != nil {
+				rowCount = int64(len(result.Rows))
+			}
+			_ = e.repo.RecordQuerySuccess(ctx, entry.ID, rowCount, executionTimeMs)
+		}
+	}
+
+	return result, execErr
 }

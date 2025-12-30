@@ -12,12 +12,14 @@ type StatementType int
 
 // Statement types.
 const (
-	StatementTypeQuery StatementType = iota // SELECT, SHOW, DESCRIBE
-	StatementTypeDML                        // INSERT, UPDATE, DELETE
-	StatementTypeDDLCreate                  // CREATE TABLE, CREATE DATABASE, etc.
-	StatementTypeDDLDrop                    // DROP TABLE, DROP DATABASE, etc.
-	StatementTypeDDLAlter                   // ALTER TABLE, etc.
-	StatementTypeOther                      // Unknown or unsupported
+	StatementTypeQuery       StatementType = iota // SELECT, SHOW, DESCRIBE
+	StatementTypeDML                              // INSERT, UPDATE, DELETE
+	StatementTypeDDLCreate                        // CREATE TABLE, CREATE DATABASE, etc.
+	StatementTypeDDLDrop                          // DROP TABLE, DROP DATABASE, etc.
+	StatementTypeDDLAlter                         // ALTER TABLE, etc.
+	StatementTypeCopy                             // COPY INTO
+	StatementTypeTransaction                      // BEGIN, COMMIT, ROLLBACK
+	StatementTypeOther                            // Unknown or unsupported
 )
 
 // Classifier provides SQL statement classification functionality.
@@ -83,6 +85,28 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 		}
 	}
 
+	// Check for COPY INTO statement
+	if strings.HasPrefix(upperSQL, "COPY") {
+		return ClassifyResult{
+			Type:            StatementTypeCopy,
+			StatementTypeID: config.StatementTypeDML, // COPY is treated as DML
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           true,
+		}
+	}
+
+	// Check for transaction control statements
+	if c.isTransactionStatement(upperSQL) {
+		return ClassifyResult{
+			Type:            StatementTypeTransaction,
+			StatementTypeID: config.StatementTypeDML, // Transaction control statements
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           false,
+		}
+	}
+
 	// Default to DML for INSERT, UPDATE, DELETE, etc.
 	return ClassifyResult{
 		Type:            StatementTypeDML,
@@ -102,6 +126,14 @@ func (c *Classifier) isQueryStatement(upperSQL string) bool {
 		strings.HasPrefix(upperSQL, "EXPLAIN")
 }
 
+// isTransactionStatement checks if the SQL is a transaction control statement.
+func (c *Classifier) isTransactionStatement(upperSQL string) bool {
+	return strings.HasPrefix(upperSQL, "BEGIN") ||
+		strings.HasPrefix(upperSQL, "START TRANSACTION") ||
+		strings.HasPrefix(upperSQL, "COMMIT") ||
+		strings.HasPrefix(upperSQL, "ROLLBACK")
+}
+
 // IsCreateTable checks if the SQL is a CREATE TABLE statement.
 func (c *Classifier) IsCreateTable(sql string) bool {
 	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
@@ -114,10 +146,16 @@ func (c *Classifier) IsDropTable(sql string) bool {
 	return strings.HasPrefix(upperSQL, "DROP TABLE")
 }
 
+// IsCopy checks if the SQL is a COPY INTO statement.
+func (c *Classifier) IsCopy(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "COPY")
+}
+
 // DefaultClassifier is the default SQL classifier instance.
 var DefaultClassifier = NewClassifier()
 
-// Classify is a convenience function using the default classifier.
+// ClassifySQL is a convenience function using the default classifier.
 func ClassifySQL(sql string) ClassifyResult {
 	return DefaultClassifier.Classify(sql)
 }
@@ -135,4 +173,33 @@ func IsDDL(sql string) bool {
 // GetStatementTypeID is a convenience function to get the statement type ID.
 func GetStatementTypeID(sql string) config.StatementTypeID {
 	return DefaultClassifier.Classify(sql).StatementTypeID
+}
+
+// IsCopy is a convenience function to check if SQL is a COPY statement.
+func IsCopy(sql string) bool {
+	return DefaultClassifier.IsCopy(sql)
+}
+
+// IsTransaction checks if the SQL is a transaction control statement.
+func IsTransaction(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return DefaultClassifier.isTransactionStatement(upperSQL)
+}
+
+// IsBegin checks if the SQL is a BEGIN/START TRANSACTION statement.
+func IsBegin(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "BEGIN") || strings.HasPrefix(upperSQL, "START TRANSACTION")
+}
+
+// IsCommit checks if the SQL is a COMMIT statement.
+func IsCommit(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "COMMIT")
+}
+
+// IsRollback checks if the SQL is a ROLLBACK statement.
+func IsRollback(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "ROLLBACK")
 }

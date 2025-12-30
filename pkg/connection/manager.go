@@ -1,3 +1,4 @@
+// Package connection provides thread-safe database connection management for DuckDB.
 package connection
 
 import (
@@ -54,7 +55,7 @@ func (m *Manager) ExecTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	}
 
 	if err := fn(tx); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return err
 	}
 

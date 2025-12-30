@@ -1,3 +1,4 @@
+//nolint:errcheck,gosec,govet,bodyclose // Test file with simplified error handling
 package integration
 
 import (
@@ -7,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/query"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/session"
+	"github.com/nnnkkk7/snowflake-emulator/pkg/stage"
 	"github.com/nnnkkk7/snowflake-emulator/server/handlers"
 )
 
@@ -83,7 +86,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *session.Manager, *metadat
 }
 
 // TestIntegration_CompleteWorkflow tests the complete workflow: login → query → logout.
-func TestIntegration_CompleteWorkflow(t *testing.T) {
+func TestIntegration_CompleteWorkflow(t *testing.T) { //nolint:gocyclo // Integration test covers complete workflow
 	server, _, _ := setupTestServer(t)
 
 	// Step 1: Login with gosnowflake protocol
@@ -101,7 +104,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -137,7 +140,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Insert request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for INSERT, got %d", resp.StatusCode)
@@ -157,7 +160,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for SELECT, got %d", resp.StatusCode)
@@ -192,7 +195,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logout request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for logout, got %d", resp.StatusCode)
@@ -211,7 +214,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request after logout failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for auth errors, check success field
 	var verifyResp map[string]interface{}
@@ -237,7 +240,7 @@ func TestIntegration_QueryWithTranslation(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var loginResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -269,7 +272,7 @@ func TestIntegration_QueryWithTranslation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -323,7 +326,7 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 				done <- false
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			var loginResp map[string]interface{}
 			json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -346,7 +349,7 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 				done <- false
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("Expected status 200 for user %d, got %d", id, resp.StatusCode)
@@ -380,7 +383,7 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var loginResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -398,7 +401,7 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Renew request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for renew, got %d", resp.StatusCode)
@@ -425,10 +428,210 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query after renew failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200 after renew, got %d", resp.StatusCode)
+	}
+}
+
+// TestIntegration_Phase2Functions tests Phase 2 SQL function translations.
+func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integration test covers multiple Phase 2 functions
+	server, _, repo := setupTestServer(t)
+
+	// Create test table with nullable and date columns for Phase 2 tests
+	ctx := context.Background()
+	database, _ := repo.GetDatabaseByName(ctx, "TEST_DB")
+	schemas, _ := repo.ListSchemas(ctx, database.ID)
+	var schema *metadata.Schema
+	for _, s := range schemas {
+		if s.Name == "PUBLIC" {
+			schema = s
+			break
+		}
+	}
+	columns := []metadata.ColumnDef{
+		{Name: "ID", Type: "INTEGER", PrimaryKey: true},
+		{Name: "NAME", Type: "VARCHAR"},
+		{Name: "EMAIL", Type: "VARCHAR", Nullable: true},
+		{Name: "SCORE", Type: "INTEGER", Nullable: true},
+		{Name: "CREATED_AT", Type: "DATE"},
+		{Name: "DATA", Type: "VARCHAR", Nullable: true},
+	}
+	_, _ = repo.CreateTable(ctx, schema.ID, "PHASE2_TEST", columns, "Phase 2 test data")
+
+	// Login
+	loginReq := map[string]interface{}{
+		"data": map[string]string{
+			"LOGIN_NAME":   "testuser",
+			"PASSWORD":     "testpass",
+			"databaseName": "TEST_DB",
+			"schemaName":   "PUBLIC",
+		},
+	}
+
+	body, _ := json.Marshal(loginReq)
+	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
+	defer func() { _ = resp.Body.Close() }()
+
+	var loginResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+	data := loginResp["data"].(map[string]interface{})
+	token := data["token"].(string)
+
+	// Insert test data
+	insertReq := map[string]string{
+		"sqlText": `INSERT INTO TEST_DB.PUBLIC_PHASE2_TEST VALUES
+			(1, 'Alice', 'alice@example.com', 95, '2024-01-15', '{"role": "admin"}'),
+			(2, 'Bob', NULL, 87, '2024-02-20', NULL),
+			(3, 'Charlie', 'charlie@example.com', NULL, '2024-03-25', '{"role": "user"}')`,
+	}
+
+	body, _ = json.Marshal(insertReq)
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+	http.DefaultClient.Do(req)
+
+	testCases := []struct {
+		name     string
+		sqlText  string
+		validate func(t *testing.T, rowset []interface{})
+	}{
+		{
+			name:    "NVL2",
+			sqlText: "SELECT NAME, NVL2(EMAIL, 'has email', 'no email') AS STATUS FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 3 {
+					t.Errorf("Expected 3 rows, got %d", len(rowset))
+					return
+				}
+				row1 := rowset[0].([]interface{})
+				if row1[1] != "has email" {
+					t.Errorf("Expected 'has email' for Alice, got %v", row1[1])
+				}
+				row2 := rowset[1].([]interface{})
+				if row2[1] != "no email" {
+					t.Errorf("Expected 'no email' for Bob, got %v", row2[1])
+				}
+			},
+		},
+		{
+			name:    "DATEADD",
+			sqlText: "SELECT NAME, DATEADD(day, 30, CREATED_AT) AS DUE_DATE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				// Just verify query succeeded - date math works
+			},
+		},
+		{
+			name:    "DATEDIFF",
+			sqlText: "SELECT NAME, DATEDIFF(day, CREATED_AT, CURRENT_DATE()) AS DAYS_SINCE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				// Just verify query succeeded - returns numeric result
+				row := rowset[0].([]interface{})
+				if row[1] == nil {
+					t.Error("Expected numeric days_since, got nil")
+				}
+			},
+		},
+		{
+			name:    "TO_VARIANT",
+			sqlText: "SELECT NAME, TO_VARIANT(SCORE) AS SCORE_JSON FROM TEST_DB.PUBLIC_PHASE2_TEST WHERE SCORE IS NOT NULL ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 2 {
+					t.Errorf("Expected 2 rows, got %d", len(rowset))
+				}
+			},
+		},
+		{
+			name:    "OBJECT_CONSTRUCT",
+			sqlText: "SELECT NAME, OBJECT_CONSTRUCT('name', NAME, 'score', SCORE) AS USER_OBJ FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+				}
+			},
+		},
+		{
+			name:    "LISTAGG",
+			sqlText: "SELECT LISTAGG(NAME, ', ') AS ALL_NAMES FROM TEST_DB.PUBLIC_PHASE2_TEST",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				row := rowset[0].([]interface{})
+				names := row[0].(string)
+				if names == "" {
+					t.Error("Expected concatenated names, got empty string")
+				}
+			},
+		},
+		{
+			name:    "Combined NVL2 with IFF",
+			sqlText: "SELECT NAME, NVL2(SCORE, IFF(SCORE >= 90, 'A', 'B'), 'N/A') AS GRADE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 3 {
+					t.Errorf("Expected 3 rows, got %d", len(rowset))
+					return
+				}
+				row1 := rowset[0].([]interface{})
+				if row1[1] != "A" {
+					t.Errorf("Expected 'A' for Alice, got %v", row1[1])
+				}
+				row2 := rowset[1].([]interface{})
+				if row2[1] != "B" {
+					t.Errorf("Expected 'B' for Bob, got %v", row2[1])
+				}
+				row3 := rowset[2].([]interface{})
+				if row3[1] != "N/A" {
+					t.Errorf("Expected 'N/A' for Charlie, got %v", row3[1])
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			queryReq := map[string]string{
+				"sqlText": tc.sqlText,
+			}
+
+			body, _ := json.Marshal(queryReq)
+			req, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Query request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+			}
+
+			var queryResp map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&queryResp)
+
+			if success, ok := queryResp["success"].(bool); !ok || !success {
+				t.Errorf("Query failed: %v", queryResp["message"])
+				return
+			}
+
+			queryData := queryResp["data"].(map[string]interface{})
+			rowset := queryData["rowset"].([]interface{})
+			tc.validate(t, rowset)
+		})
 	}
 }
 
@@ -448,7 +651,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for errors - check success field
 	var errResp map[string]interface{}
@@ -466,7 +669,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, _ = http.DefaultClient.Do(req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for auth errors - check success field
 	var authResp map[string]interface{}
@@ -505,7 +708,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
 
 	resp, _ = http.DefaultClient.Do(req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for SQL errors - check success field
 	var sqlErrResp map[string]interface{}
@@ -513,4 +716,179 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	if success, ok := sqlErrResp["success"].(bool); ok && success {
 		t.Error("Expected error for invalid SQL")
 	}
+}
+
+// TestIntegration_CopyInto tests COPY INTO functionality end-to-end.
+func TestIntegration_CopyInto(t *testing.T) {
+	// Setup
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Create database, schema, stage
+	database, err := repo.CreateDatabase(ctx, "COPY_TEST_DB", "")
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+
+	schema, err := repo.CreateSchema(ctx, database.ID, "PUBLIC", "")
+	if err != nil {
+		t.Fatalf("failed to create schema: %v", err)
+	}
+
+	// Create temp directory for stages
+	stageDir, err := os.MkdirTemp("", "snowflake-stage-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(stageDir)
+
+	stageMgr := stage.NewManager(repo, stageDir)
+	executor := query.NewExecutor(mgr, repo)
+	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
+	executor.SetCopyHandler(copyHandler)
+
+	// Create stage
+	_, err = stageMgr.CreateStage(ctx, schema.ID, "TEST_STAGE", "INTERNAL", "", "")
+	if err != nil {
+		t.Fatalf("failed to create stage: %v", err)
+	}
+
+	// Create target table via repository (creates both metadata and DuckDB table)
+	columns := []metadata.ColumnDef{
+		{Name: "ID", Type: "INTEGER"},
+		{Name: "NAME", Type: "VARCHAR"},
+		{Name: "VALUE", Type: "DOUBLE"},
+	}
+	_, err = repo.CreateTable(ctx, schema.ID, "COPY_TARGET", columns, "Test table for COPY INTO")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Put CSV file in stage
+	csvData := `1,Alice,10.5
+2,Bob,20.0
+3,Charlie,30.5`
+	err = stageMgr.PutFile(ctx, schema.ID, "TEST_STAGE", "data.csv", bytes.NewReader([]byte(csvData)))
+	if err != nil {
+		t.Fatalf("failed to put file: %v", err)
+	}
+
+	// Execute COPY INTO via executor (use 3-part name: database.schema.table)
+	result, err := executor.Execute(ctx, "COPY INTO COPY_TEST_DB.PUBLIC.COPY_TARGET FROM @TEST_STAGE FILE_FORMAT = (TYPE = CSV FIELD_DELIMITER = ',')")
+	if err != nil {
+		t.Fatalf("COPY INTO failed: %v", err)
+	}
+
+	if result.RowsAffected != 3 {
+		t.Errorf("Expected 3 rows loaded, got %d", result.RowsAffected)
+	}
+
+	// Verify data was loaded (use DB.SCHEMA_TABLE naming convention)
+	queryResult, err := executor.Query(ctx, "SELECT * FROM COPY_TEST_DB.PUBLIC_COPY_TARGET ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+
+	if len(queryResult.Rows) != 3 {
+		t.Errorf("Expected 3 rows in table, got %d", len(queryResult.Rows))
+	}
+
+	t.Logf("COPY INTO successfully loaded %d rows", len(queryResult.Rows))
+}
+
+// TestIntegration_QueryHistory tests query history tracking end-to-end.
+func TestIntegration_QueryHistory(t *testing.T) {
+	// Setup
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	ctx := context.Background()
+	executor := query.NewExecutor(mgr, repo)
+
+	// Create test database (schema not needed for this test)
+	_, err = repo.CreateDatabase(ctx, "HISTORY_DB", "")
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+
+	// Execute queries with history tracking
+	sessionID := "test-session-123"
+	queryID1 := "query-001"
+	queryID2 := "query-002"
+	queryID3 := "query-003"
+
+	// Query 1: Successful SELECT
+	_, err = executor.QueryWithHistory(ctx, sessionID, queryID1, "SELECT 1 AS test")
+	if err != nil {
+		t.Fatalf("Query 1 failed: %v", err)
+	}
+
+	// Query 2: Successful DDL (use simple table name that DuckDB can handle)
+	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)")
+	if err != nil {
+		t.Fatalf("Query 2 failed: %v", err)
+	}
+
+	// Query 3: Failed query
+	_, _ = executor.QueryWithHistory(ctx, sessionID, queryID3, "SELECT * FROM NONEXISTENT_TABLE")
+
+	// Verify history was recorded
+	history, err := repo.GetQueryHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistory failed: %v", err)
+	}
+
+	if len(history) < 3 {
+		t.Errorf("Expected at least 3 history entries, got %d", len(history))
+	}
+
+	// Verify by session
+	sessionHistory, err := repo.GetQueryHistoryBySession(ctx, sessionID, 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistoryBySession failed: %v", err)
+	}
+
+	if len(sessionHistory) != 3 {
+		t.Errorf("Expected 3 entries for session, got %d", len(sessionHistory))
+	}
+
+	// Verify statuses
+	var successCount, failedCount int
+	for _, entry := range sessionHistory {
+		switch entry.Status {
+		case "SUCCESS":
+			successCount++
+		case "FAILED":
+			failedCount++
+		}
+	}
+
+	if successCount != 2 {
+		t.Errorf("Expected 2 SUCCESS entries, got %d", successCount)
+	}
+	if failedCount != 1 {
+		t.Errorf("Expected 1 FAILED entry, got %d", failedCount)
+	}
+
+	t.Logf("Query history: %d entries (%d success, %d failed)", len(sessionHistory), successCount, failedCount)
 }

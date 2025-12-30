@@ -17,13 +17,13 @@ import (
 // 3. Table creation with columns
 // 4. Data insertion and retrieval
 // 5. Cleanup (drop table, schema, database)
-func TestIntegration_CompleteWorkflow(t *testing.T) {
+func TestIntegration_CompleteWorkflow(t *testing.T) { //nolint:gocyclo // Integration test covers complete workflow
 	// Setup: Create in-memory DuckDB
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := NewRepository(mgr)
@@ -101,7 +101,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query error = %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []struct {
 		ID    int
@@ -195,7 +195,7 @@ func TestIntegration_MultipleSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := NewRepository(mgr)
@@ -213,14 +213,12 @@ func TestIntegration_MultipleSchemas(t *testing.T) {
 
 	// Create multiple schemas
 	schemaNames := []string{"PUBLIC", "STAGING", "ANALYTICS"}
-	createdSchemas := make([]*Schema, 0, len(schemaNames))
 
 	for _, name := range schemaNames {
-		schema, err := repo.CreateSchema(ctx, database.ID, name, "")
+		_, err := repo.CreateSchema(ctx, database.ID, name, "")
 		if err != nil {
 			t.Fatalf("CreateSchema(%s) error = %v", name, err)
 		}
-		createdSchemas = append(createdSchemas, schema)
 	}
 
 	// List all schemas
@@ -254,12 +252,12 @@ func TestIntegration_MultipleSchemas(t *testing.T) {
 }
 
 // TestIntegration_MultipleTables tests multiple tables in a single schema.
-func TestIntegration_MultipleTables(t *testing.T) {
+func TestIntegration_MultipleTables(t *testing.T) { //nolint:gocyclo // Integration test
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := NewRepository(mgr)
@@ -364,7 +362,7 @@ func TestIntegration_MultipleTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join query error = %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
 		t.Fatal("Expected at least one row from join query")
@@ -390,12 +388,12 @@ func TestIntegration_MultipleTables(t *testing.T) {
 }
 
 // TestIntegration_DatabaseIsolation tests that data is properly isolated between databases.
-func TestIntegration_DatabaseIsolation(t *testing.T) {
+func TestIntegration_DatabaseIsolation(t *testing.T) { //nolint:gocyclo // Integration test
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := NewRepository(mgr)

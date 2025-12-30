@@ -7,6 +7,12 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
+// Type constants for Snowflake data types.
+const (
+	TypeText  = "TEXT"
+	ValueNull = "NULL"
+)
+
 // TypeMapper provides DuckDB to Snowflake type mapping functionality.
 type TypeMapper struct {
 	typeMapping map[string]string
@@ -16,37 +22,37 @@ type TypeMapper struct {
 func NewTypeMapper() *TypeMapper {
 	return &TypeMapper{
 		typeMapping: map[string]string{
-			"BIGINT":           "NUMBER",
-			"INTEGER":          "NUMBER",
-			"INT":              "NUMBER",
-			"SMALLINT":         "NUMBER",
-			"TINYINT":          "NUMBER",
-			"HUGEINT":          "NUMBER",
-			"DOUBLE":           "FLOAT",
-			"FLOAT":            "FLOAT",
-			"REAL":             "FLOAT",
-			"VARCHAR":          "TEXT",
-			"TEXT":             "TEXT",
-			"STRING":           "TEXT",
-			"TIMESTAMP":        "TIMESTAMP_NTZ",
-			"TIMESTAMP_NS":     "TIMESTAMP_NTZ",
-			"TIMESTAMP_MS":     "TIMESTAMP_NTZ",
-			"TIMESTAMP_S":      "TIMESTAMP_NTZ",
-			"TIMESTAMPTZ":      "TIMESTAMP_TZ",
-			"DATE":             "DATE",
-			"TIME":             "TIME",
-			"BOOLEAN":          "BOOLEAN",
-			"BOOL":             "BOOLEAN",
-			"DECIMAL":          "NUMBER",
-			"NUMERIC":          "NUMBER",
-			"BLOB":             "BINARY",
-			"BYTEA":            "BINARY",
-			"UUID":             "TEXT",
-			"INTERVAL":         "TEXT",
-			"JSON":             "VARIANT",
-			"LIST":             "ARRAY",
-			"STRUCT":           "OBJECT",
-			"MAP":              "OBJECT",
+			"BIGINT":       "NUMBER",
+			"INTEGER":      "NUMBER",
+			"INT":          "NUMBER",
+			"SMALLINT":     "NUMBER",
+			"TINYINT":      "NUMBER",
+			"HUGEINT":      "NUMBER",
+			"DOUBLE":       "FLOAT",
+			"FLOAT":        "FLOAT",
+			"REAL":         "FLOAT",
+			"VARCHAR":      TypeText,
+			"TEXT":         TypeText,
+			"STRING":       TypeText,
+			"TIMESTAMP":    "TIMESTAMP_NTZ",
+			"TIMESTAMP_NS": "TIMESTAMP_NTZ",
+			"TIMESTAMP_MS": "TIMESTAMP_NTZ",
+			"TIMESTAMP_S":  "TIMESTAMP_NTZ",
+			"TIMESTAMPTZ":  "TIMESTAMP_TZ",
+			"DATE":         "DATE",
+			"TIME":         "TIME",
+			"BOOLEAN":      "BOOLEAN",
+			"BOOL":         "BOOLEAN",
+			"DECIMAL":      "NUMBER",
+			"NUMERIC":      "NUMBER",
+			"BLOB":         "BINARY",
+			"BYTEA":        "BINARY",
+			"UUID":         TypeText,
+			"INTERVAL":     TypeText,
+			"JSON":         "VARIANT",
+			"LIST":         "ARRAY",
+			"STRUCT":       "OBJECT",
+			"MAP":          "OBJECT",
 		},
 	}
 }
@@ -56,7 +62,7 @@ func (m *TypeMapper) MapDuckDBType(duckType string) string {
 	if sfType, ok := m.typeMapping[duckType]; ok {
 		return sfType
 	}
-	return "TEXT" // Default fallback
+	return TypeText // Default fallback
 }
 
 // InferRowType generates column metadata from column names and optional sql.Rows.
@@ -66,7 +72,7 @@ func (m *TypeMapper) InferRowType(columns []string, rows *sql.Rows) []types.Colu
 	for i, col := range columns {
 		meta := types.ColumnMetadata{
 			Name:     col,
-			Type:     "TEXT", // Default type
+			Type:     TypeText, // Default type
 			Nullable: true,
 		}
 
@@ -78,11 +84,11 @@ func (m *TypeMapper) InferRowType(columns []string, rows *sql.Rows) []types.Colu
 				meta.Type = m.MapDuckDBType(dbType)
 
 				if length, ok := columnTypes[i].Length(); ok {
-					meta.Length = int64(length)
+					meta.Length = length
 				}
 				if precision, scale, ok := columnTypes[i].DecimalSize(); ok {
-					meta.Precision = int64(precision)
-					meta.Scale = int64(scale)
+					meta.Precision = precision
+					meta.Scale = scale
 				}
 				if nullable, ok := columnTypes[i].Nullable(); ok {
 					meta.Nullable = nullable

@@ -22,13 +22,13 @@ func contains(s, substr string) bool {
 // 2. SQL translation (Snowflake → DuckDB)
 // 3. Query execution
 // 4. Result retrieval
-func TestIntegration_QueryEngineWorkflow(t *testing.T) {
+func TestIntegration_QueryEngineWorkflow(t *testing.T) { //nolint:gocyclo // Integration test covers complete workflow
 	// Setup: Create in-memory DuckDB
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := metadata.NewRepository(mgr)
@@ -92,7 +92,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 		(101, 1, 150.50, '2024-04-01', 'completed'),
 		(102, 1, 200.00, '2024-04-15', 'completed'),
 		(103, 2, 75.25, '2024-04-20', 'pending'),
-		(104, 3, 300.00, '2024-04-25', 'cancelled')
+		(104, 3, 300.00, '2024-04-25', 'canceled')
 	`
 	_, err = executor.Execute(ctx, orderInsertSQL)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 
 	// Step 4: Test Snowflake SQL queries with translation
 	t.Run("IFFWithAggregation", func(t *testing.T) {
-		sql := `
+		sqlText := `
 			SELECT
 				NAME,
 				IFF(IS_ACTIVE, 'Active', 'Inactive') AS status,
@@ -110,7 +110,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 			GROUP BY NAME, IS_ACTIVE
 			ORDER BY NAME
 		`
-		result, err := executor.Query(ctx, sql)
+		result, err := executor.Query(ctx, sqlText)
 		if err != nil {
 			t.Fatalf("Query() error = %v", err)
 		}
@@ -133,24 +133,24 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 	})
 
 	t.Run("NVLWithJoin", func(t *testing.T) {
-		sql := `
+		sqlText := `
 			SELECT
 				c.NAME,
 				NVL(c.EMAIL, 'no-email@example.com') AS email,
 				SUM(o.AMOUNT) AS total_spent
 			FROM ANALYTICS_DB.PROD_CUSTOMERS c
 			LEFT JOIN ANALYTICS_DB.PROD_ORDERS o ON c.CUSTOMER_ID = o.CUSTOMER_ID
-			WHERE o.STATUS != 'cancelled'
+			WHERE o.STATUS != 'canceled'
 			GROUP BY c.NAME, c.EMAIL
 			ORDER BY total_spent DESC
 		`
-		result, err := executor.Query(ctx, sql)
+		result, err := executor.Query(ctx, sqlText)
 		if err != nil {
 			t.Fatalf("Query() error = %v", err)
 		}
 
 		if len(result.Rows) != 2 {
-			t.Errorf("Expected 2 rows (excluding cancelled), got %d", len(result.Rows))
+			t.Errorf("Expected 2 rows (excluding canceled), got %d", len(result.Rows))
 		}
 
 		// Verify top spender
@@ -168,7 +168,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 	})
 
 	t.Run("CONCATWithAggregation", func(t *testing.T) {
-		sql := `
+		sqlText := `
 			SELECT
 				CONCAT(c.NAME, ' <', NVL(c.EMAIL, 'none'), '>') AS contact,
 				COUNT(o.ORDER_ID) AS order_count
@@ -178,7 +178,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 			HAVING COUNT(o.ORDER_ID) > 0
 			ORDER BY order_count DESC
 		`
-		result, err := executor.Query(ctx, sql)
+		result, err := executor.Query(ctx, sqlText)
 		if err != nil {
 			t.Fatalf("Query() error = %v", err)
 		}
@@ -201,7 +201,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 	})
 
 	t.Run("ComplexAnalyticsQuery", func(t *testing.T) {
-		sql := `
+		sqlText := `
 			SELECT
 				IFF(o.AMOUNT > 100, 'High Value', 'Low Value') AS order_category,
 				COUNT(*) AS order_count,
@@ -211,7 +211,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 			GROUP BY IFF(o.AMOUNT > 100, 'High Value', 'Low Value')
 			ORDER BY total_amount DESC
 		`
-		result, err := executor.Query(ctx, sql)
+		result, err := executor.Query(ctx, sqlText)
 		if err != nil {
 			t.Fatalf("Query() error = %v", err)
 		}
@@ -230,7 +230,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 	})
 
 	t.Run("DateFunctions", func(t *testing.T) {
-		sql := `
+		sqlText := `
 			SELECT
 				NAME,
 				SIGNUP_DATE,
@@ -240,7 +240,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 			ORDER BY SIGNUP_DATE
 			LIMIT 1
 		`
-		result, err := executor.Query(ctx, sql)
+		result, err := executor.Query(ctx, sqlText)
 		if err != nil {
 			t.Fatalf("Query() error = %v", err)
 		}
@@ -258,16 +258,16 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 
 	// Step 5: Test error handling
 	t.Run("InvalidSyntax", func(t *testing.T) {
-		sql := "SELECT FROM ANALYTICS_DB.PROD_CUSTOMERS"
-		_, err := executor.Query(ctx, sql)
+		sqlText := "SELECT FROM ANALYTICS_DB.PROD_CUSTOMERS"
+		_, err := executor.Query(ctx, sqlText)
 		if err == nil {
 			t.Error("Expected error for invalid SQL, got nil")
 		}
 	})
 
 	t.Run("NonExistentTable", func(t *testing.T) {
-		sql := "SELECT * FROM ANALYTICS_DB.NONEXISTENT_TABLE"
-		_, err := executor.Query(ctx, sql)
+		sqlText := "SELECT * FROM ANALYTICS_DB.NONEXISTENT_TABLE"
+		_, err := executor.Query(ctx, sqlText)
 		if err == nil {
 			t.Error("Expected error for non-existent table, got nil")
 		}
@@ -307,7 +307,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 	t.Run("DeleteWithCondition", func(t *testing.T) {
 		deleteSQL := `
 			DELETE FROM ANALYTICS_DB.PROD_ORDERS
-			WHERE STATUS = 'cancelled'
+			WHERE STATUS = 'canceled'
 		`
 		result, err := executor.Execute(ctx, deleteSQL)
 		if err != nil {
@@ -319,7 +319,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 		}
 
 		// Verify deletion
-		selectSQL := "SELECT COUNT(*) FROM ANALYTICS_DB.PROD_ORDERS WHERE STATUS = 'cancelled'"
+		selectSQL := "SELECT COUNT(*) FROM ANALYTICS_DB.PROD_ORDERS WHERE STATUS = 'canceled'"
 		queryResult, err := executor.Query(ctx, selectSQL)
 		if err != nil {
 			t.Fatalf("Query after delete error = %v", err)
@@ -328,7 +328,7 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) {
 		if len(queryResult.Rows) > 0 {
 			count := queryResult.Rows[0][0]
 			if count.(int64) != 0 {
-				t.Errorf("Expected 0 cancelled orders, got %v", count)
+				t.Errorf("Expected 0 canceled orders, got %v", count)
 			}
 		}
 	})
@@ -340,7 +340,7 @@ func TestIntegration_ConcurrentQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open DuckDB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mgr := connection.NewManager(db)
 	repo, err := metadata.NewRepository(mgr)
@@ -358,18 +358,18 @@ func TestIntegration_ConcurrentQueries(t *testing.T) {
 		{Name: "ID", Type: "INTEGER", PrimaryKey: true},
 		{Name: "VALUE", Type: "INTEGER"},
 	}
-	repo.CreateTable(ctx, schema.ID, "TEST_TABLE", cols, "")
+	_, _ = repo.CreateTable(ctx, schema.ID, "TEST_TABLE", cols, "")
 
 	// Insert test data
 	insertSQL := "INSERT INTO CONCURRENT_DB.PUBLIC_TEST_TABLE (ID, VALUE) VALUES (1, 100), (2, 200), (3, 300)"
-	executor.Execute(ctx, insertSQL)
+	_, _ = executor.Execute(ctx, insertSQL)
 
 	// Run concurrent queries
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
-			sql := "SELECT IFF(VALUE > 150, 'HIGH', 'LOW') AS category, COUNT(*) FROM CONCURRENT_DB.PUBLIC_TEST_TABLE GROUP BY category"
-			_, err := executor.Query(ctx, sql)
+			sqlText := "SELECT IFF(VALUE > 150, 'HIGH', 'LOW') AS category, COUNT(*) FROM CONCURRENT_DB.PUBLIC_TEST_TABLE GROUP BY category"
+			_, err := executor.Query(ctx, sqlText)
 			if err != nil {
 				t.Errorf("Concurrent query error: %v", err)
 			}

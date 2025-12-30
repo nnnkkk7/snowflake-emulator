@@ -11,46 +11,46 @@ func TestManager_CreateWarehouse(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
+		name          string
 		warehouseName string
-		size        string
-		comment     string
-		wantErr     bool
+		size          string
+		comment       string
+		wantErr       bool
 	}{
 		{
-			name:        "Valid warehouse",
+			name:          "Valid warehouse",
 			warehouseName: "TEST_WH",
-			size:        "X-SMALL",
-			comment:     "Test warehouse",
-			wantErr:     false,
+			size:          "X-SMALL",
+			comment:       "Test warehouse",
+			wantErr:       false,
 		},
 		{
-			name:        "Default size",
+			name:          "Default size",
 			warehouseName: "DEFAULT_WH",
-			size:        "",
-			comment:     "",
-			wantErr:     false,
+			size:          "",
+			comment:       "",
+			wantErr:       false,
 		},
 		{
-			name:        "Large warehouse",
+			name:          "Large warehouse",
 			warehouseName: "LARGE_WH",
-			size:        "LARGE",
-			comment:     "",
-			wantErr:     false,
+			size:          "LARGE",
+			comment:       "",
+			wantErr:       false,
 		},
 		{
-			name:        "Empty name",
+			name:          "Empty name",
 			warehouseName: "",
-			size:        "X-SMALL",
-			comment:     "",
-			wantErr:     true,
+			size:          "X-SMALL",
+			comment:       "",
+			wantErr:       true,
 		},
 		{
-			name:        "Invalid size",
+			name:          "Invalid size",
 			warehouseName: "INVALID_SIZE_WH",
-			size:        "GIGANTIC",
-			comment:     "",
-			wantErr:     true,
+			size:          "GIGANTIC",
+			comment:       "",
+			wantErr:       true,
 		},
 	}
 
