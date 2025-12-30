@@ -7,6 +7,12 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
+// Type constants for Snowflake data types.
+const (
+	TypeText  = "TEXT"
+	ValueNull = "NULL"
+)
+
 // TypeMapper provides DuckDB to Snowflake type mapping functionality.
 type TypeMapper struct {
 	typeMapping map[string]string
@@ -25,9 +31,9 @@ func NewTypeMapper() *TypeMapper {
 			"DOUBLE":       "FLOAT",
 			"FLOAT":        "FLOAT",
 			"REAL":         "FLOAT",
-			"VARCHAR":      "TEXT",
-			"TEXT":         "TEXT",
-			"STRING":       "TEXT",
+			"VARCHAR":      TypeText,
+			"TEXT":         TypeText,
+			"STRING":       TypeText,
 			"TIMESTAMP":    "TIMESTAMP_NTZ",
 			"TIMESTAMP_NS": "TIMESTAMP_NTZ",
 			"TIMESTAMP_MS": "TIMESTAMP_NTZ",
@@ -41,8 +47,8 @@ func NewTypeMapper() *TypeMapper {
 			"NUMERIC":      "NUMBER",
 			"BLOB":         "BINARY",
 			"BYTEA":        "BINARY",
-			"UUID":         "TEXT",
-			"INTERVAL":     "TEXT",
+			"UUID":         TypeText,
+			"INTERVAL":     TypeText,
 			"JSON":         "VARIANT",
 			"LIST":         "ARRAY",
 			"STRUCT":       "OBJECT",
@@ -56,7 +62,7 @@ func (m *TypeMapper) MapDuckDBType(duckType string) string {
 	if sfType, ok := m.typeMapping[duckType]; ok {
 		return sfType
 	}
-	return "TEXT" // Default fallback
+	return TypeText // Default fallback
 }
 
 // InferRowType generates column metadata from column names and optional sql.Rows.
@@ -66,7 +72,7 @@ func (m *TypeMapper) InferRowType(columns []string, rows *sql.Rows) []types.Colu
 	for i, col := range columns {
 		meta := types.ColumnMetadata{
 			Name:     col,
-			Type:     "TEXT", // Default type
+			Type:     TypeText, // Default type
 			Nullable: true,
 		}
 

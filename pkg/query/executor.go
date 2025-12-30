@@ -201,11 +201,11 @@ func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[stri
 // formatBindingValue formats a binding value for SQL substitution.
 func formatBindingValue(b *BindingValue) (string, error) {
 	if b == nil {
-		return "NULL", nil
+		return ValueNull, nil
 	}
 
 	switch strings.ToUpper(b.Type) {
-	case "TEXT", "VARCHAR", "STRING":
+	case TypeText, "VARCHAR", "STRING":
 		// Escape single quotes and wrap in quotes
 		escaped := strings.ReplaceAll(b.Value, "'", "''")
 		return "'" + escaped + "'", nil
@@ -241,8 +241,8 @@ func formatBindingValue(b *BindingValue) (string, error) {
 	case "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ":
 		return "TIMESTAMP '" + b.Value + "'", nil
 
-	case "NULL":
-		return "NULL", nil
+	case ValueNull:
+		return ValueNull, nil
 
 	default:
 		// Default to text treatment

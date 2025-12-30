@@ -334,7 +334,7 @@ func (h *CopyHandler) loadCSVFile(ctx context.Context, stmt *CopyStatement, sche
 			}
 
 			if isNull || val == "" {
-				values[i] = "NULL"
+				values[i] = ValueNull
 			} else {
 				// Escape single quotes
 				values[i] = "'" + strings.ReplaceAll(val, "'", "''") + "'"
