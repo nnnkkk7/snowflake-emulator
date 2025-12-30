@@ -1,0 +1,28 @@
+name: tagpr
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  tagpr:
+    runs-on: ubuntu-latest
+    outputs:
+      # Make tagpr execution results available to other jobs
+      tag-name: ${{ steps.run-tagpr.outputs.tag-name }}
+      tag-created: ${{ steps.run-tagpr.outputs.tag-created }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Run tagpr
+        id: run-tagpr
+        uses: Songmu/tagpr@75738aa2880a03a1036bc5bd90ef49853427ec65 # v1.10.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
