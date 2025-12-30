@@ -13,17 +13,17 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
-// RESTAPIV2Handler handles REST API v2 requests.
-type RESTAPIV2Handler struct {
+// RestAPIv2Handler handles REST API v2 requests.
+type RestAPIv2Handler struct {
 	executor     *query.Executor
 	stmtMgr      *query.StatementManager
 	repo         *metadata.Repository
 	warehouseMgr *warehouse.Manager
 }
 
-// NewRESTAPIV2Handler creates a new REST API v2 handler.
-func NewRESTAPIV2Handler(executor *query.Executor, stmtMgr *query.StatementManager, repo *metadata.Repository) *RESTAPIV2Handler {
-	return &RESTAPIV2Handler{
+// NewRestAPIv2Handler creates a new REST API v2 handler.
+func NewRestAPIv2Handler(executor *query.Executor, stmtMgr *query.StatementManager, repo *metadata.Repository) *RestAPIv2Handler {
+	return &RestAPIv2Handler{
 		executor:     executor,
 		stmtMgr:      stmtMgr,
 		repo:         repo,
@@ -31,9 +31,9 @@ func NewRESTAPIV2Handler(executor *query.Executor, stmtMgr *query.StatementManag
 	}
 }
 
-// NewRESTAPIV2HandlerWithWarehouse creates a new REST API v2 handler with warehouse manager.
-func NewRESTAPIV2HandlerWithWarehouse(executor *query.Executor, stmtMgr *query.StatementManager, repo *metadata.Repository, warehouseMgr *warehouse.Manager) *RESTAPIV2Handler {
-	return &RESTAPIV2Handler{
+// NewRestAPIv2HandlerWithWarehouse creates a new REST API v2 handler with warehouse manager.
+func NewRestAPIv2HandlerWithWarehouse(executor *query.Executor, stmtMgr *query.StatementManager, repo *metadata.Repository, warehouseMgr *warehouse.Manager) *RestAPIv2Handler {
+	return &RestAPIv2Handler{
 		executor:     executor,
 		stmtMgr:      stmtMgr,
 		repo:         repo,
@@ -42,7 +42,7 @@ func NewRESTAPIV2HandlerWithWarehouse(executor *query.Executor, stmtMgr *query.S
 }
 
 // SubmitStatement handles POST /api/v2/statements.
-func (h *RESTAPIV2Handler) SubmitStatement(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Request) {
 	var req types.SubmitStatementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
@@ -61,7 +61,7 @@ func (h *RESTAPIV2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 	// Execute the statement synchronously
 	ctx := r.Context()
 
-	// Convert bindings from types.BindingValue to query.BindingValue
+	// Convert bindings from types.BindingValue to query.QueryBindingValue
 	var result *query.Result
 	var err error
 	if len(req.Bindings) > 0 {
@@ -100,7 +100,7 @@ func (h *RESTAPIV2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 }
 
 // GetStatement handles GET /api/v2/statements/{handle}.
-func (h *RESTAPIV2Handler) GetStatement(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) GetStatement(w http.ResponseWriter, r *http.Request) {
 	handle := chi.URLParam(r, "handle")
 
 	stmt, ok := h.stmtMgr.GetStatement(handle)
@@ -146,7 +146,7 @@ func (h *RESTAPIV2Handler) GetStatement(w http.ResponseWriter, r *http.Request) 
 }
 
 // CancelStatement handles POST /api/v2/statements/{handle}/cancel.
-func (h *RESTAPIV2Handler) CancelStatement(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) CancelStatement(w http.ResponseWriter, r *http.Request) {
 	handle := chi.URLParam(r, "handle")
 
 	stmt, ok := h.stmtMgr.GetStatement(handle)
@@ -173,7 +173,7 @@ func (h *RESTAPIV2Handler) CancelStatement(w http.ResponseWriter, r *http.Reques
 }
 
 // buildStatementResponse builds a success response from a query result.
-func (h *RESTAPIV2Handler) buildStatementResponse(stmt *query.Statement, result *query.Result) types.StatementResponse {
+func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result *query.Result) types.StatementResponse {
 	// Convert row type
 	rowType := make([]types.RowTypeField, len(result.ColumnTypes))
 	for i, col := range result.ColumnTypes {
@@ -206,7 +206,7 @@ func (h *RESTAPIV2Handler) buildStatementResponse(stmt *query.Statement, result 
 }
 
 // sendError sends an error response.
-func (h *RESTAPIV2Handler) sendError(w http.ResponseWriter, statusCode int, message, sqlState string) {
+func (h *RestAPIv2Handler) sendError(w http.ResponseWriter, statusCode int, message, sqlState string) {
 	resp := types.StatementResponse{
 		Code:     apierror.CodeInvalidParameter,
 		SQLState: sqlState,
@@ -221,7 +221,7 @@ func (h *RESTAPIV2Handler) sendError(w http.ResponseWriter, statusCode int, mess
 // Resource Management Handlers
 
 // ListDatabases handles GET /api/v2/databases.
-func (h *RESTAPIV2Handler) ListDatabases(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	databases, err := h.repo.ListDatabases(ctx)
@@ -246,7 +246,7 @@ func (h *RESTAPIV2Handler) ListDatabases(w http.ResponseWriter, r *http.Request)
 }
 
 // GetDatabase handles GET /api/v2/databases/{database}.
-func (h *RESTAPIV2Handler) GetDatabase(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) GetDatabase(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 
@@ -269,7 +269,7 @@ func (h *RESTAPIV2Handler) GetDatabase(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateDatabase handles POST /api/v2/databases.
-func (h *RESTAPIV2Handler) CreateDatabase(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 	var req types.DatabaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
@@ -302,7 +302,7 @@ func (h *RESTAPIV2Handler) CreateDatabase(w http.ResponseWriter, r *http.Request
 }
 
 // DeleteDatabase handles DELETE /api/v2/databases/{database}.
-func (h *RESTAPIV2Handler) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 
@@ -315,7 +315,7 @@ func (h *RESTAPIV2Handler) DeleteDatabase(w http.ResponseWriter, r *http.Request
 }
 
 // ListSchemas handles GET /api/v2/databases/{database}/schemas.
-func (h *RESTAPIV2Handler) ListSchemas(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) ListSchemas(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 
@@ -348,7 +348,7 @@ func (h *RESTAPIV2Handler) ListSchemas(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSchema handles GET /api/v2/databases/{database}/schemas/{schema}.
-func (h *RESTAPIV2Handler) GetSchema(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) GetSchema(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 	schemaName := chi.URLParam(r, "schema")
@@ -379,7 +379,7 @@ func (h *RESTAPIV2Handler) GetSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateSchema handles POST /api/v2/databases/{database}/schemas.
-func (h *RESTAPIV2Handler) CreateSchema(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) CreateSchema(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 
@@ -420,7 +420,7 @@ func (h *RESTAPIV2Handler) CreateSchema(w http.ResponseWriter, r *http.Request) 
 }
 
 // DeleteSchema handles DELETE /api/v2/databases/{database}/schemas/{schema}.
-func (h *RESTAPIV2Handler) DeleteSchema(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) DeleteSchema(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 	schemaName := chi.URLParam(r, "schema")
@@ -446,7 +446,7 @@ func (h *RESTAPIV2Handler) DeleteSchema(w http.ResponseWriter, r *http.Request) 
 }
 
 // ListTables handles GET /api/v2/databases/{database}/schemas/{schema}/tables.
-func (h *RESTAPIV2Handler) ListTables(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) ListTables(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 	schemaName := chi.URLParam(r, "schema")
@@ -488,7 +488,7 @@ func (h *RESTAPIV2Handler) ListTables(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTable handles GET /api/v2/databases/{database}/schemas/{schema}/tables/{table}.
-func (h *RESTAPIV2Handler) GetTable(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) GetTable(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 	schemaName := chi.URLParam(r, "schema")
@@ -528,7 +528,7 @@ func (h *RESTAPIV2Handler) GetTable(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteTable handles DELETE /api/v2/databases/{database}/schemas/{schema}/tables/{table}.
-func (h *RESTAPIV2Handler) DeleteTable(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) DeleteTable(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 	schemaName := chi.URLParam(r, "schema")
@@ -563,7 +563,7 @@ func (h *RESTAPIV2Handler) DeleteTable(w http.ResponseWriter, r *http.Request) {
 // Warehouse Management Handlers
 
 // ListWarehouses handles GET /api/v2/warehouses.
-func (h *RESTAPIV2Handler) ListWarehouses(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) ListWarehouses(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	warehouses, err := h.warehouseMgr.ListWarehouses(ctx)
@@ -593,7 +593,7 @@ func (h *RESTAPIV2Handler) ListWarehouses(w http.ResponseWriter, r *http.Request
 }
 
 // GetWarehouse handles GET /api/v2/warehouses/{warehouse}.
-func (h *RESTAPIV2Handler) GetWarehouse(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) GetWarehouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	warehouseName := chi.URLParam(r, "warehouse")
 
@@ -621,7 +621,7 @@ func (h *RESTAPIV2Handler) GetWarehouse(w http.ResponseWriter, r *http.Request) 
 }
 
 // CreateWarehouse handles POST /api/v2/warehouses.
-func (h *RESTAPIV2Handler) CreateWarehouse(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) CreateWarehouse(w http.ResponseWriter, r *http.Request) {
 	var req types.WarehouseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
@@ -659,7 +659,7 @@ func (h *RESTAPIV2Handler) CreateWarehouse(w http.ResponseWriter, r *http.Reques
 }
 
 // DeleteWarehouse handles DELETE /api/v2/warehouses/{warehouse}.
-func (h *RESTAPIV2Handler) DeleteWarehouse(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) DeleteWarehouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	warehouseName := chi.URLParam(r, "warehouse")
 
@@ -672,7 +672,7 @@ func (h *RESTAPIV2Handler) DeleteWarehouse(w http.ResponseWriter, r *http.Reques
 }
 
 // ResumeWarehouse handles POST /api/v2/warehouses/{warehouse}:resume.
-func (h *RESTAPIV2Handler) ResumeWarehouse(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) ResumeWarehouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	warehouseName := chi.URLParam(r, "warehouse")
 
@@ -705,7 +705,7 @@ func (h *RESTAPIV2Handler) ResumeWarehouse(w http.ResponseWriter, r *http.Reques
 }
 
 // SuspendWarehouse handles POST /api/v2/warehouses/{warehouse}:suspend.
-func (h *RESTAPIV2Handler) SuspendWarehouse(w http.ResponseWriter, r *http.Request) {
+func (h *RestAPIv2Handler) SuspendWarehouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	warehouseName := chi.URLParam(r, "warehouse")
 
@@ -737,16 +737,16 @@ func (h *RESTAPIV2Handler) SuspendWarehouse(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// convertBindings converts types.BindingValue map to query.BindingValue map.
-func convertBindings(bindings map[string]*types.BindingValue) map[string]*query.BindingValue {
+// convertBindings converts types.BindingValue map to query.QueryBindingValue map.
+func convertBindings(bindings map[string]*types.BindingValue) map[string]*query.QueryBindingValue {
 	if bindings == nil {
 		return nil
 	}
 
-	result := make(map[string]*query.BindingValue, len(bindings))
+	result := make(map[string]*query.QueryBindingValue, len(bindings))
 	for key, val := range bindings {
 		if val != nil {
-			result[key] = &query.BindingValue{
+			result[key] = &query.QueryBindingValue{
 				Type:  val.Type,
 				Value: val.Value,
 			}

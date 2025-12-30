@@ -66,7 +66,7 @@ func main() {
 
 	sessionHandler := handlers.NewSessionHandler(sessionMgr, repo)
 	queryHandler := handlers.NewQueryHandler(executor, sessionMgr)
-	restAPIHandler := handlers.NewRESTAPIV2Handler(executor, stmtMgr, repo)
+	restAPIHandler := handlers.NewRestAPIv2Handler(executor, stmtMgr, repo)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

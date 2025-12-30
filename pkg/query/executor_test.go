@@ -330,14 +330,14 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 	tests := []struct {
 		name         string
 		sql          string
-		bindings     map[string]*BindingValue
+		bindings     map[string]*QueryBindingValue
 		expectedRows int
 		checkValue   func(t *testing.T, rows [][]interface{})
 	}{
 		{
 			name: "IntegerBinding",
 			sql:  "SELECT :1 AS num",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "FIXED", Value: "42"},
 			},
 			expectedRows: 1,
@@ -350,7 +350,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name: "TextBinding",
 			sql:  "SELECT :1 AS name",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "TEXT", Value: "Hello World"},
 			},
 			expectedRows: 1,
@@ -363,7 +363,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name: "MultipleBindings",
 			sql:  "SELECT :1 AS a, :2 AS b, :3 AS c",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "FIXED", Value: "1"},
 				"2": {Type: "TEXT", Value: "test"},
 				"3": {Type: "REAL", Value: "3.14"},
@@ -378,7 +378,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name: "BooleanBindingTrue",
 			sql:  "SELECT :1 AS flag",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "BOOLEAN", Value: "true"},
 			},
 			expectedRows: 1,
@@ -391,7 +391,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name: "BooleanBindingFalse",
 			sql:  "SELECT :1 AS flag",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "BOOLEAN", Value: "false"},
 			},
 			expectedRows: 1,
@@ -404,7 +404,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name: "TextWithSpecialChars",
 			sql:  "SELECT :1 AS text",
-			bindings: map[string]*BindingValue{
+			bindings: map[string]*QueryBindingValue{
 				"1": {Type: "TEXT", Value: "hello-world_123"},
 			},
 			expectedRows: 1,
@@ -423,7 +423,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 		{
 			name:         "EmptyBindings",
 			sql:          "SELECT 1 AS num",
-			bindings:     map[string]*BindingValue{},
+			bindings:     map[string]*QueryBindingValue{},
 			expectedRows: 1,
 		},
 	}
@@ -450,7 +450,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 func TestFormatBindingValue(t *testing.T) {
 	tests := []struct {
 		name     string
-		binding  *BindingValue
+		binding  *QueryBindingValue
 		expected string
 		wantErr  bool
 	}{
@@ -461,57 +461,57 @@ func TestFormatBindingValue(t *testing.T) {
 		},
 		{
 			name:     "TextValue",
-			binding:  &BindingValue{Type: "TEXT", Value: "hello"},
+			binding:  &QueryBindingValue{Type: "TEXT", Value: "hello"},
 			expected: "'hello'",
 		},
 		{
 			name:     "TextWithQuotes",
-			binding:  &BindingValue{Type: "TEXT", Value: "it's"},
+			binding:  &QueryBindingValue{Type: "TEXT", Value: "it's"},
 			expected: "'it''s'",
 		},
 		{
 			name:     "IntegerValue",
-			binding:  &BindingValue{Type: "FIXED", Value: "123"},
+			binding:  &QueryBindingValue{Type: "FIXED", Value: "123"},
 			expected: "123",
 		},
 		{
 			name:     "RealValue",
-			binding:  &BindingValue{Type: "REAL", Value: "3.14"},
+			binding:  &QueryBindingValue{Type: "REAL", Value: "3.14"},
 			expected: "3.14",
 		},
 		{
 			name:     "BooleanTrue",
-			binding:  &BindingValue{Type: "BOOLEAN", Value: "true"},
+			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: "true"},
 			expected: "TRUE",
 		},
 		{
 			name:     "BooleanFalse",
-			binding:  &BindingValue{Type: "BOOLEAN", Value: "false"},
+			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: "false"},
 			expected: "FALSE",
 		},
 		{
 			name:     "DateValue",
-			binding:  &BindingValue{Type: "DATE", Value: "2024-01-15"},
+			binding:  &QueryBindingValue{Type: "DATE", Value: "2024-01-15"},
 			expected: "DATE '2024-01-15'",
 		},
 		{
 			name:     "TimestampValue",
-			binding:  &BindingValue{Type: "TIMESTAMP", Value: "2024-01-15 10:30:00"},
+			binding:  &QueryBindingValue{Type: "TIMESTAMP", Value: "2024-01-15 10:30:00"},
 			expected: "TIMESTAMP '2024-01-15 10:30:00'",
 		},
 		{
 			name:     "NullType",
-			binding:  &BindingValue{Type: "NULL", Value: ""},
+			binding:  &QueryBindingValue{Type: "NULL", Value: ""},
 			expected: "NULL",
 		},
 		{
 			name:    "InvalidInteger",
-			binding: &BindingValue{Type: "FIXED", Value: "not a number"},
+			binding: &QueryBindingValue{Type: "FIXED", Value: "not a number"},
 			wantErr: true,
 		},
 		{
 			name:    "InvalidReal",
-			binding: &BindingValue{Type: "REAL", Value: "not a float"},
+			binding: &QueryBindingValue{Type: "REAL", Value: "not a float"},
 			wantErr: true,
 		},
 	}
