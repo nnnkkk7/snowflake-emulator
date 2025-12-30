@@ -1,0 +1,143 @@
+# GoReleaser v2 configuration
+version: 2
+
+# Commands to run before build
+before:
+  hooks:
+    # Tidy dependencies
+    - go mod tidy
+    # Download dependencies (for cache efficiency)
+    - go mod download
+
+# Build configuration
+builds:
+  - id: gopin
+    # Main package path
+    main: ./cmd/gopin
+
+    # Generated binary name
+    binary: gopin
+
+    # Environment variables
+    env:
+      # Disable CGO for easier cross-compilation
+      - CGO_ENABLED=0
+
+    # Target operating systems
+    goos:
+      - linux
+      - darwin   # macOS
+      - windows
+
+    # Target architectures
+    goarch:
+      - amd64
+      - arm64
+
+    # Unsupported combinations
+    ignore:
+      # Windows ARM64 support is still incomplete
+      - goos: windows
+        goarch: arm64
+
+    # Linker flags (version information injection)
+    ldflags:
+      # -s: strip symbol table (reduce binary size)
+      # -w: strip DWARF debug info (reduce binary size)
+      - -s -w
+      # Inject version information to pkg/cli.Version
+      # Note: github.com/nnnkkk7/gopin must match module name in go.mod
+      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Version={{.Version}}
+      # Additional information (optional)
+      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Commit={{.Commit}}
+      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Date={{.Date}}
+
+# Archive settings (create tar.gz/zip for releases)
+archives:
+  - id: gopin-archive
+    # Archive formats (tar.gz for unix, zip for windows)
+    formats:
+      - tar.gz
+
+    # Archive filename template
+    # Example: gopin_0.1.0_Darwin_x86_64.tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+    # OS-specific format overrides
+    format_overrides:
+      # Use zip for Windows
+      - goos: windows
+        formats: [zip]
+
+    # Files to include in archive
+    files:
+      - README.md
+      - LICENSE
+      - CLAUDE.md
+
+# Generate checksum file
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# Snapshot build naming convention
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# CHANGELOG generation settings
+changelog:
+  # Use GitHub native auto-generation
+  use: github-native
+
+  # Custom CHANGELOG example (commented out)
+  # sort: asc
+  # filters:
+  #   exclude:
+  #     - '^docs:'
+  #     - '^test:'
+  #     - '^chore:'
+  # groups:
+  #   - title: 'New Features'
+  #     regexp: '^.*?feat(\(.+\))?!?:.+$'
+  #     order: 0
+  #   - title: 'Bug Fixes'
+  #     regexp: '^.*?fix(\(.+\))?!?:.+$'
+  #     order: 1
+  #   - title: 'Other Changes'
+  #     order: 999
+
+# GitHub Release settings
+release:
+  github:
+    owner: nnnkkk7
+    name: snowflake-emulator
+
+  # Do not create as draft
+  draft: false
+
+  # Auto-detect prerelease (e.g., v1.0.0-beta.1 is automatically prerelease)
+  prerelease: auto
+
+  # Replace existing release if it exists
+  mode: replace
+
+  # Release notes header
+  header: |
+    ## snowflake-emulator {{ .Version }}
+
+    A local emulator for Snowflake.
+
+  # Release notes footer
+  footer: |
+    ---
+
+    **Full Changelog**: https://github.com/nnnkkk7/snowflake-emulator/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    **Documentation**: https://github.com/nnnkkk7/snowflake-emulator#readme
