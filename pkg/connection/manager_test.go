@@ -58,7 +58,7 @@ func TestManager_Query_Concurrent(t *testing.T) {
 				errors <- fmt.Errorf("goroutine %d: query failed: %w", id, err)
 				return
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 
 			if !rows.Next() {
 				errors <- fmt.Errorf("goroutine %d: no rows returned", id)
@@ -141,11 +141,12 @@ func TestManager_ExecTx(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		fn      func(*sql.Tx) error
 		wantErr bool
+		fn      func(*sql.Tx) error
 	}{
 		{
-			name: "SuccessfulTransaction",
+			name:    "SuccessfulTransaction",
+			wantErr: false,
 			fn: func(tx *sql.Tx) error {
 				_, err := tx.Exec("INSERT INTO test VALUES (1, 'Alice')")
 				if err != nil {
@@ -154,10 +155,10 @@ func TestManager_ExecTx(t *testing.T) {
 				_, err = tx.Exec("INSERT INTO test VALUES (2, 'Bob')")
 				return err
 			},
-			wantErr: false,
 		},
 		{
-			name: "FailedTransaction",
+			name:    "FailedTransaction",
+			wantErr: true,
 			fn: func(tx *sql.Tx) error {
 				_, err := tx.Exec("INSERT INTO test VALUES (3, 'Charlie')")
 				if err != nil {
@@ -166,7 +167,6 @@ func TestManager_ExecTx(t *testing.T) {
 				// This should fail and cause rollback
 				return fmt.Errorf("simulated error")
 			},
-			wantErr: true,
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestManager_ExecTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
 		t.Fatal("no rows returned")
@@ -216,7 +216,7 @@ func TestManager_NewManager(t *testing.T) {
 		t.Errorf("Query() error = %v", err)
 	}
 	if rows != nil {
-		rows.Close()
+		_ = rows.Close()
 	}
 }
 
@@ -228,9 +228,12 @@ func TestManager_QueryContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := mgr.Query(ctx, "SELECT 1")
+	rows, err := mgr.Query(ctx, "SELECT 1")
+	if rows != nil {
+		_ = rows.Close()
+	}
 	if err == nil {
-		t.Error("expected error with cancelled context, got nil")
+		t.Error("expected error with canceled context, got nil")
 	}
 }
 
@@ -244,6 +247,6 @@ func TestManager_ExecContext(t *testing.T) {
 
 	_, err := mgr.Exec(ctx, "CREATE TABLE test (id INT)")
 	if err == nil {
-		t.Error("expected error with cancelled context, got nil")
+		t.Error("expected error with canceled context, got nil")
 	}
 }

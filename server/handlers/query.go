@@ -1,3 +1,4 @@
+// Package handlers provides HTTP handlers for the Snowflake emulator API.
 package handlers
 
 import (
@@ -71,19 +72,23 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 // executeQuery executes a SELECT query with gosnowflake protocol.
-func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sqlText string) {
+func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	result, err := h.executor.Query(ctx, sqlText)
 	if err != nil {
 		// Use apierror for error classification
-		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, "query execution failed", err))
+		// Include the underlying error in the message for debugging
+		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, fmt.Sprintf("query execution failed: %v", err), err))
 		return
 	}
 
 	// Generate unique query ID
 	queryID := generateQueryID()
 
-	// Infer row type from result columns using the type mapper
-	rowType := query.InferColumnMetadata(result.Columns, nil)
+	// Use column types captured from actual query result
+	rowType := result.ColumnTypes
+
+	// Convert all values to strings for gosnowflake protocol
+	rowSet := convertRowsToStrings(result.Rows)
 
 	// Build success response
 	resp := types.QueryResponse{
@@ -93,7 +98,7 @@ func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, 
 			SQLState:          apierror.SQLStateSuccess,
 			StatementTypeID:   int64(config.StatementTypeSelect),
 			RowType:           rowType,
-			RowSet:            result.Rows,
+			RowSet:            rowSet,
 			Total:             int64(len(result.Rows)),
 			Returned:          int64(len(result.Rows)),
 			QueryResultFormat: config.QueryResultFormatJSON,
@@ -102,11 +107,11 @@ func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // executeDML executes a DML/DDL statement with gosnowflake protocol.
-func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sqlText string) {
+func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	result, err := h.executor.Execute(ctx, sqlText)
 	if err != nil {
 		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, "statement execution failed", err))
@@ -134,7 +139,7 @@ func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sq
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // AbortQuery handles query abort requests.
@@ -153,14 +158,33 @@ func (h *QueryHandler) AbortQuery(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // generateQueryID generates a unique query ID.
 func generateQueryID() string {
 	bytes := make([]byte, 8)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-only ID if random generation fails
+		return fmt.Sprintf("01%d-00000000", time.Now().Unix())
+	}
 	timestamp := time.Now().Unix()
 	return fmt.Sprintf("01%d-%s", timestamp, hex.EncodeToString(bytes))
 }
 
+// convertRowsToStrings converts all values in rows to strings for gosnowflake protocol.
+func convertRowsToStrings(rows [][]interface{}) [][]string {
+	result := make([][]string, len(rows))
+	for i, row := range rows {
+		strRow := make([]string, len(row))
+		for j, val := range row {
+			if val == nil {
+				strRow[j] = ""
+			} else {
+				strRow[j] = fmt.Sprintf("%v", val)
+			}
+		}
+		result[i] = strRow
+	}
+	return result
+}

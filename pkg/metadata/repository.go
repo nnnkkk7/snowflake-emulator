@@ -1,3 +1,4 @@
+// Package metadata provides metadata management for Snowflake databases, schemas, and tables.
 package metadata
 
 import (
@@ -245,7 +246,7 @@ func (r *Repository) ListDatabases(ctx context.Context) ([]*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list databases: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var databases []*Database
 	for rows.Next() {
@@ -388,7 +389,7 @@ func (r *Repository) ListSchemas(ctx context.Context, databaseID string) ([]*Sch
 	if err != nil {
 		return nil, fmt.Errorf("failed to list schemas: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var schemas []*Schema
 	for rows.Next() {
@@ -586,7 +587,7 @@ func (r *Repository) ListTables(ctx context.Context, schemaID string) ([]*Table,
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []*Table
 	for rows.Next() {

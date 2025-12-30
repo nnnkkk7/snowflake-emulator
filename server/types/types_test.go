@@ -92,16 +92,16 @@ func TestQueryResponseJSON(t *testing.T) {
 	resp := QueryResponse{
 		Success: true,
 		Data: &QuerySuccessData{
-			QueryID:           "01234567890-1234567890",
-			SQLState:          "00000",
-			StatementTypeID:   1,
+			QueryID:         "01234567890-1234567890",
+			SQLState:        "00000",
+			StatementTypeID: 1,
 			RowType: []ColumnMetadata{
 				{Name: "ID", Type: "NUMBER", Nullable: false},
 				{Name: "NAME", Type: "TEXT", Nullable: true},
 			},
-			RowSet: [][]interface{}{
-				{1, "Alice"},
-				{2, "Bob"},
+			RowSet: [][]string{
+				{"1", "Alice"},
+				{"2", "Bob"},
 			},
 			Total:             2,
 			Returned:          2,

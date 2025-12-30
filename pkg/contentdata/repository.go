@@ -1,3 +1,4 @@
+// Package contentdata manages actual table data in DuckDB.
 package contentdata
 
 import (
@@ -194,8 +195,8 @@ func snowflakeToDuckDBType(snowflakeType string) string {
 	// Map Snowflake types to DuckDB types
 	mapping := map[string]string{
 		// Numeric types
-		"NUMBER":      "DECIMAL",
-		"INT":         "INTEGER",
+		"NUMBER": "DECIMAL",
+		"INT":    "INTEGER",
 		"INTEGER":     "INTEGER",
 		"BIGINT":      "BIGINT",
 		"SMALLINT":    "SMALLINT",

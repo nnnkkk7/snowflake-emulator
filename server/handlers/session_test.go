@@ -393,3 +393,67 @@ func TestSessionHandler_UseContext(t *testing.T) {
 		t.Error("Expected success to be true")
 	}
 }
+
+// TestExtractToken tests the token extraction from Authorization header.
+func TestExtractToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{
+			name:     "SnowflakeTokenWithQuotes",
+			header:   `Snowflake Token="test-token-123"`,
+			expected: "test-token-123",
+		},
+		{
+			name:     "SnowflakeTokenWithoutQuotes",
+			header:   `Snowflake Token=test-token-123`,
+			expected: "test-token-123",
+		},
+		{
+			name:     "BearerToken",
+			header:   `Bearer test-token-123`,
+			expected: "test-token-123",
+		},
+		{
+			name:     "BearerTokenLowercase",
+			header:   `bearer test-token-123`,
+			expected: "test-token-123",
+		},
+		{
+			name:     "SnowflakeLowercase",
+			header:   `snowflake Token="test-token-123"`,
+			expected: "test-token-123",
+		},
+		{
+			name:     "EmptyHeader",
+			header:   "",
+			expected: "",
+		},
+		{
+			name:     "InvalidFormat",
+			header:   "Invalid format",
+			expected: "",
+		},
+		{
+			name:     "WhitespaceAround",
+			header:   `  Snowflake Token="test-token"  `,
+			expected: "test-token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+
+			result := extractToken(req)
+			if result != tt.expected {
+				t.Errorf("extractToken() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}

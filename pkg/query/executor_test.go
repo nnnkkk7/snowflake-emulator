@@ -90,7 +90,7 @@ func TestExecutor_ExecuteQuery(t *testing.T) {
 }
 
 // TestExecutor_ExecuteWithTranslation tests query execution with Snowflake SQL translation.
-func TestExecutor_ExecuteWithTranslation(t *testing.T) {
+func TestExecutor_ExecuteWithTranslation(t *testing.T) { //nolint:gocyclo // Test covers multiple execution cases
 	executor, repo := setupTestExecutor(t)
 	ctx := context.Background()
 

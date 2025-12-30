@@ -1,3 +1,4 @@
+//nolint:errcheck,gosec,govet,bodyclose // Test file with simplified error handling
 package integration
 
 import (
@@ -83,7 +84,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *session.Manager, *metadat
 }
 
 // TestIntegration_CompleteWorkflow tests the complete workflow: login → query → logout.
-func TestIntegration_CompleteWorkflow(t *testing.T) {
+func TestIntegration_CompleteWorkflow(t *testing.T) { //nolint:gocyclo // Integration test covers complete workflow
 	server, _, _ := setupTestServer(t)
 
 	// Step 1: Login with gosnowflake protocol
@@ -101,7 +102,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -137,7 +138,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Insert request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for INSERT, got %d", resp.StatusCode)
@@ -157,7 +158,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for SELECT, got %d", resp.StatusCode)
@@ -192,7 +193,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logout request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for logout, got %d", resp.StatusCode)
@@ -211,7 +212,7 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request after logout failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for auth errors, check success field
 	var verifyResp map[string]interface{}
@@ -237,7 +238,7 @@ func TestIntegration_QueryWithTranslation(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var loginResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -269,7 +270,7 @@ func TestIntegration_QueryWithTranslation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -323,7 +324,7 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 				done <- false
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			var loginResp map[string]interface{}
 			json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -346,7 +347,7 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 				done <- false
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("Expected status 200 for user %d, got %d", id, resp.StatusCode)
@@ -380,7 +381,7 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var loginResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&loginResp)
@@ -398,7 +399,7 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Renew request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200 for renew, got %d", resp.StatusCode)
@@ -425,10 +426,210 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query after renew failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200 after renew, got %d", resp.StatusCode)
+	}
+}
+
+// TestIntegration_Phase2Functions tests Phase 2 SQL function translations.
+func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integration test covers multiple Phase 2 functions
+	server, _, repo := setupTestServer(t)
+
+	// Create test table with nullable and date columns for Phase 2 tests
+	ctx := context.Background()
+	database, _ := repo.GetDatabaseByName(ctx, "TEST_DB")
+	schemas, _ := repo.ListSchemas(ctx, database.ID)
+	var schema *metadata.Schema
+	for _, s := range schemas {
+		if s.Name == "PUBLIC" {
+			schema = s
+			break
+		}
+	}
+	columns := []metadata.ColumnDef{
+		{Name: "ID", Type: "INTEGER", PrimaryKey: true},
+		{Name: "NAME", Type: "VARCHAR"},
+		{Name: "EMAIL", Type: "VARCHAR", Nullable: true},
+		{Name: "SCORE", Type: "INTEGER", Nullable: true},
+		{Name: "CREATED_AT", Type: "DATE"},
+		{Name: "DATA", Type: "VARCHAR", Nullable: true},
+	}
+	_, _ = repo.CreateTable(ctx, schema.ID, "PHASE2_TEST", columns, "Phase 2 test data")
+
+	// Login
+	loginReq := map[string]interface{}{
+		"data": map[string]string{
+			"LOGIN_NAME":   "testuser",
+			"PASSWORD":     "testpass",
+			"databaseName": "TEST_DB",
+			"schemaName":   "PUBLIC",
+		},
+	}
+
+	body, _ := json.Marshal(loginReq)
+	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
+	defer func() { _ = resp.Body.Close() }()
+
+	var loginResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+	data := loginResp["data"].(map[string]interface{})
+	token := data["token"].(string)
+
+	// Insert test data
+	insertReq := map[string]string{
+		"sqlText": `INSERT INTO TEST_DB.PUBLIC_PHASE2_TEST VALUES
+			(1, 'Alice', 'alice@example.com', 95, '2024-01-15', '{"role": "admin"}'),
+			(2, 'Bob', NULL, 87, '2024-02-20', NULL),
+			(3, 'Charlie', 'charlie@example.com', NULL, '2024-03-25', '{"role": "user"}')`,
+	}
+
+	body, _ = json.Marshal(insertReq)
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+	http.DefaultClient.Do(req)
+
+	testCases := []struct {
+		name     string
+		sqlText  string
+		validate func(t *testing.T, rowset []interface{})
+	}{
+		{
+			name:    "NVL2",
+			sqlText: "SELECT NAME, NVL2(EMAIL, 'has email', 'no email') AS STATUS FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 3 {
+					t.Errorf("Expected 3 rows, got %d", len(rowset))
+					return
+				}
+				row1 := rowset[0].([]interface{})
+				if row1[1] != "has email" {
+					t.Errorf("Expected 'has email' for Alice, got %v", row1[1])
+				}
+				row2 := rowset[1].([]interface{})
+				if row2[1] != "no email" {
+					t.Errorf("Expected 'no email' for Bob, got %v", row2[1])
+				}
+			},
+		},
+		{
+			name:    "DATEADD",
+			sqlText: "SELECT NAME, DATEADD(day, 30, CREATED_AT) AS DUE_DATE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				// Just verify query succeeded - date math works
+			},
+		},
+		{
+			name:    "DATEDIFF",
+			sqlText: "SELECT NAME, DATEDIFF(day, CREATED_AT, CURRENT_DATE()) AS DAYS_SINCE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				// Just verify query succeeded - returns numeric result
+				row := rowset[0].([]interface{})
+				if row[1] == nil {
+					t.Error("Expected numeric days_since, got nil")
+				}
+			},
+		},
+		{
+			name:    "TO_VARIANT",
+			sqlText: "SELECT NAME, TO_VARIANT(SCORE) AS SCORE_JSON FROM TEST_DB.PUBLIC_PHASE2_TEST WHERE SCORE IS NOT NULL ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 2 {
+					t.Errorf("Expected 2 rows, got %d", len(rowset))
+				}
+			},
+		},
+		{
+			name:    "OBJECT_CONSTRUCT",
+			sqlText: "SELECT NAME, OBJECT_CONSTRUCT('name', NAME, 'score', SCORE) AS USER_OBJ FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+				}
+			},
+		},
+		{
+			name:    "LISTAGG",
+			sqlText: "SELECT LISTAGG(NAME, ', ') AS ALL_NAMES FROM TEST_DB.PUBLIC_PHASE2_TEST",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 1 {
+					t.Errorf("Expected 1 row, got %d", len(rowset))
+					return
+				}
+				row := rowset[0].([]interface{})
+				names := row[0].(string)
+				if names == "" {
+					t.Error("Expected concatenated names, got empty string")
+				}
+			},
+		},
+		{
+			name:    "Combined NVL2 with IFF",
+			sqlText: "SELECT NAME, NVL2(SCORE, IFF(SCORE >= 90, 'A', 'B'), 'N/A') AS GRADE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			validate: func(t *testing.T, rowset []interface{}) {
+				if len(rowset) != 3 {
+					t.Errorf("Expected 3 rows, got %d", len(rowset))
+					return
+				}
+				row1 := rowset[0].([]interface{})
+				if row1[1] != "A" {
+					t.Errorf("Expected 'A' for Alice, got %v", row1[1])
+				}
+				row2 := rowset[1].([]interface{})
+				if row2[1] != "B" {
+					t.Errorf("Expected 'B' for Bob, got %v", row2[1])
+				}
+				row3 := rowset[2].([]interface{})
+				if row3[1] != "N/A" {
+					t.Errorf("Expected 'N/A' for Charlie, got %v", row3[1])
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			queryReq := map[string]string{
+				"sqlText": tc.sqlText,
+			}
+
+			body, _ := json.Marshal(queryReq)
+			req, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Query request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+			}
+
+			var queryResp map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&queryResp)
+
+			if success, ok := queryResp["success"].(bool); !ok || !success {
+				t.Errorf("Query failed: %v", queryResp["message"])
+				return
+			}
+
+			queryData := queryResp["data"].(map[string]interface{})
+			rowset := queryData["rowset"].([]interface{})
+			tc.validate(t, rowset)
+		})
 	}
 }
 
@@ -448,7 +649,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	body, _ := json.Marshal(loginReq)
 	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for errors - check success field
 	var errResp map[string]interface{}
@@ -466,7 +667,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, _ = http.DefaultClient.Do(req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for auth errors - check success field
 	var authResp map[string]interface{}
@@ -505,7 +706,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	req.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
 
 	resp, _ = http.DefaultClient.Do(req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Snowflake returns 200 even for SQL errors - check success field
 	var sqlErrResp map[string]interface{}

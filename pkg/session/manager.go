@@ -113,10 +113,10 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Session, 
 		return nil, fmt.Errorf("token cannot be empty")
 	}
 
-	m.mu.RLock()
-	session, exists := m.sessions[token]
-	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
+	session, exists := m.sessions[token]
 	if !exists {
 		return nil, fmt.Errorf("invalid session token")
 	}
@@ -124,16 +124,12 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Session, 
 	// Check if session is expired
 	if time.Now().After(session.ExpiresAt) {
 		// Remove expired session
-		m.mu.Lock()
 		delete(m.sessions, token)
-		m.mu.Unlock()
 		return nil, fmt.Errorf("session expired")
 	}
 
 	// Update last accessed time
-	m.mu.Lock()
 	session.LastAccessedAt = time.Now()
-	m.mu.Unlock()
 
 	return session.Copy(), nil
 }

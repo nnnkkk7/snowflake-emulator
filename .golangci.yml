@@ -1,0 +1,138 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt         # Standard Go formatting
+    - goimports     # Import formatting and organization
+    - gci           # Canonical import grouping and formatting
+    - gofumpt       # Stricter gofmt with additional style rules
+
+  settings: {}
+
+linters:
+  # Start with no defaults and explicitly enable linters
+  default: none
+
+  enable:
+    # Core linters - essential for code quality
+    - errcheck      # Check for unchecked errors
+    - govet         # Reports suspicious constructs
+    - staticcheck   # Go static analysis
+    - unused        # Check for unused code
+    - ineffassign   # Detect ineffectual assignments
+
+    # Style and consistency
+    - misspell      # Find commonly misspelled words
+    - goconst       # Find repeated strings that could be constants
+
+    # Error handling
+    - errorlint     # Find code that will cause problems with Go 1.13+ error wrapping
+
+    # Modern Go features
+    - copyloopvar   # Detect loop variable issues (Go 1.22+)
+
+    # Code quality
+    - gocritic      # Comprehensive meta-linter
+    - revive        # Fast, configurable, extensible linter
+    - unconvert     # Remove unnecessary type conversions
+
+    # Security
+    - gosec         # Security-focused linter
+
+    # Complexity
+    - gocyclo       # Compute cyclomatic complexity
+
+    # Best practices
+    - nolintlint    # Reports ill-formed or insufficient nolint directives
+    - bodyclose     # Check for unclosed HTTP response bodies
+
+  settings:
+    gocyclo:
+      # Maximum cyclomatic complexity - reasonable for CLI tools
+      min-complexity: 15
+
+    misspell:
+      locale: US
+
+    govet:
+      # Enable all analyzers
+      enable-all: true
+      # Disable shadow variable detection (can be noisy)
+      disable:
+        - shadow
+
+    gocritic:
+      # Enable multiple check groups
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - paramTypeCombine  # Can be noisy for CLI flag definitions
+        - unnamedResult     # Allow unnamed results for simple functions
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+issues:
+  # Maximum issues count per linter (0 = unlimited)
+  max-issues-per-linter: 50
+
+  # Maximum count of same issues (0 = unlimited)
+  max-same-issues: 10
+
+  # Make issues output unique by line
+  uniq-by-line: false
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Modules download mode (readonly for CI)
+  modules-download-mode: readonly
+
+  # Include test files in analysis
+  tests: true
+
+  # Build tags to use during analysis
+  build-tags: []
+
+output:
+  # Format for output
+  formats:
+    text:
+      path: stdout
+      print-issued-lines: true
+      print-linter-name: true
+      colors: true
+
+  # Sort order for issues
+  sort-order:
+    - file
+    - linter
+
+  # Show statistics per linter
+  show-stats: false

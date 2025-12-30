@@ -1,3 +1,4 @@
+// Package main provides the entry point for the Snowflake emulator server.
 package main
 
 import (
@@ -32,13 +33,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Failed to close database: %v", err)
+		}
+	}()
 
 	connMgr := connection.NewManager(db)
 
 	repo, err := metadata.NewRepository(connMgr)
 	if err != nil {
-		log.Fatalf("Failed to create repository: %v", err)
+		log.Printf("Failed to create repository: %v", err)
+		return
 	}
 
 	sessionMgr := session.NewManager(24 * time.Hour)
@@ -59,17 +65,35 @@ func main() {
 	r.Post("/session/renew", sessionHandler.RenewSession)
 	r.Post("/session/logout", sessionHandler.Logout)
 	r.Post("/session/use", sessionHandler.UseContext)
+	r.Post("/session", sessionHandler.CloseSession) // gosnowflake sends POST /session?delete=true
 
 	r.Post("/queries/v1/query-request", queryHandler.ExecuteQuery)
 	r.Post("/queries/v1/abort-request", queryHandler.AbortQuery)
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+	// Telemetry endpoint - accept and ignore (gosnowflake sends telemetry data)
+	r.Post("/telemetry/send", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("OK")); err != nil {
+			log.Printf("Failed to write health response: %v", err)
+		}
+	})
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
 	log.Printf("Starting Snowflake Emulator on port %s", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatalf("Server failed: %v", err) //nolint:gocritic // exitAfterDefer: intentional - OS cleans up on exit
 	}
 }

@@ -1,3 +1,4 @@
+// Package apierror provides Snowflake-compatible error types and responses.
 package apierror
 
 import (

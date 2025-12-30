@@ -78,11 +78,11 @@ func (m *TypeMapper) InferRowType(columns []string, rows *sql.Rows) []types.Colu
 				meta.Type = m.MapDuckDBType(dbType)
 
 				if length, ok := columnTypes[i].Length(); ok {
-					meta.Length = int64(length)
+					meta.Length = length
 				}
 				if precision, scale, ok := columnTypes[i].DecimalSize(); ok {
-					meta.Precision = int64(precision)
-					meta.Scale = int64(scale)
+					meta.Precision = precision
+					meta.Scale = scale
 				}
 				if nullable, ok := columnTypes[i].Nullable(); ok {
 					meta.Nullable = nullable

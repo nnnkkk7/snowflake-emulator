@@ -1,3 +1,4 @@
+// Package types provides API request/response types for the gosnowflake protocol.
 package types
 
 // Session API Types
@@ -8,16 +9,18 @@ type LoginRequest struct {
 }
 
 type LoginRequestData struct {
-	ClientAppID      string            `json:"CLIENT_APP_ID"`
-	ClientAppVersion string            `json:"CLIENT_APP_VERSION"`
-	AccountName      string            `json:"ACCOUNT_NAME"`
-	LoginName        string            `json:"LOGIN_NAME"`
-	Password         string            `json:"PASSWORD"`
-	DatabaseName     string            `json:"databaseName,omitempty"`
-	SchemaName       string            `json:"schemaName,omitempty"`
-	WarehouseName    string            `json:"warehouseName,omitempty"`
-	RoleName         string            `json:"roleName,omitempty"`
-	SessionParams    map[string]string `json:"SESSION_PARAMETERS,omitempty"`
+	ClientAppID       string         `json:"CLIENT_APP_ID"`
+	ClientAppVersion  string         `json:"CLIENT_APP_VERSION"`
+	SVNRevision       string         `json:"SVN_REVISION,omitempty"`
+	AccountName       string         `json:"ACCOUNT_NAME"`
+	LoginName         string         `json:"LOGIN_NAME"`
+	Password          string         `json:"PASSWORD"`
+	DatabaseName      string         `json:"databaseName,omitempty"`
+	SchemaName        string         `json:"schemaName,omitempty"`
+	WarehouseName     string         `json:"warehouseName,omitempty"`
+	RoleName          string         `json:"roleName,omitempty"`
+	SessionParams     map[string]any `json:"SESSION_PARAMETERS,omitempty"`
+	ClientEnvironment map[string]any `json:"CLIENT_ENVIRONMENT,omitempty"`
 }
 
 type LoginResponse struct {
@@ -98,7 +101,7 @@ type QuerySuccessData struct {
 	SQLState          string           `json:"sqlState,omitempty"`
 	StatementTypeID   int64            `json:"statementTypeId"`
 	RowType           []ColumnMetadata `json:"rowtype,omitempty"`
-	RowSet            [][]interface{}  `json:"rowset,omitempty"`
+	RowSet            [][]string       `json:"rowset,omitempty"`
 	Total             int64            `json:"total"`
 	Returned          int64            `json:"returned"`
 	QueryResultFormat string           `json:"queryResultFormat"`

@@ -117,7 +117,7 @@ func (c *Classifier) IsDropTable(sql string) bool {
 // DefaultClassifier is the default SQL classifier instance.
 var DefaultClassifier = NewClassifier()
 
-// Classify is a convenience function using the default classifier.
+// ClassifySQL is a convenience function using the default classifier.
 func ClassifySQL(sql string) ClassifyResult {
 	return DefaultClassifier.Classify(sql)
 }

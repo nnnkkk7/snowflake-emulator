@@ -6,6 +6,7 @@ import (
 
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
+	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
@@ -17,8 +18,9 @@ type Executor struct {
 
 // QueryResult represents the result of a query execution.
 type QueryResult struct {
-	Columns []string
-	Rows    [][]interface{}
+	Columns     []string
+	ColumnTypes []types.ColumnMetadata
+	Rows        [][]interface{}
 }
 
 // ExecResult represents the result of a non-query execution (INSERT, UPDATE, DELETE, etc.).
@@ -48,13 +50,16 @@ func (e *Executor) Query(ctx context.Context, sql string) (*QueryResult, error) 
 	if err != nil {
 		return nil, fmt.Errorf("query execution error: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
+
+	// Capture column types before iterating (using TypeMapper)
+	columnTypes := InferColumnMetadata(columns, rows)
 
 	// Fetch all rows
 	var resultRows [][]interface{}
@@ -84,8 +89,9 @@ func (e *Executor) Query(ctx context.Context, sql string) (*QueryResult, error) 
 	}
 
 	return &QueryResult{
-		Columns: columns,
-		Rows:    resultRows,
+		Columns:     columns,
+		ColumnTypes: columnTypes,
+		Rows:        resultRows,
 	}, nil
 }
 

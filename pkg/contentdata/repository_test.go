@@ -71,11 +71,13 @@ func TestRepository_CreateTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query table existence: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var count int
 	if rows.Next() {
-		rows.Scan(&count)
+		if err := rows.Scan(&count); err != nil {
+			t.Fatalf("Failed to scan count: %v", err)
+		}
 	}
 
 	if count != 1 {
@@ -111,11 +113,13 @@ func TestRepository_DropTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query table existence: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var count int
 	if rows.Next() {
-		rows.Scan(&count)
+		if err := rows.Scan(&count); err != nil {
+			t.Fatalf("Failed to scan count: %v", err)
+		}
 	}
 
 	if count != 0 {
@@ -163,11 +167,13 @@ func TestRepository_InsertData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query row count: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var count int
 	if rows.Next() {
-		rows.Scan(&count)
+		if err := rows.Scan(&count); err != nil {
+			t.Fatalf("Failed to scan count: %v", err)
+		}
 	}
 
 	if count != 3 {
@@ -206,7 +212,7 @@ func TestRepository_ExecuteQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteQuery() error = %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Count rows
 	rowCount := 0
