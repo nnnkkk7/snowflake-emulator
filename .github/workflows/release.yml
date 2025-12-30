@@ -20,9 +20,6 @@ on:
 
 permissions:
   contents: write
-  # For future build attestations
-  # id-token: write
-  # attestations: write
 
 jobs:
   goreleaser:
@@ -95,9 +92,7 @@ jobs:
         if: steps.get-tag.outputs.skip != 'true'
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          go-version: stable
-          # Auto-detect version from go.mod
-          # go-version-file: 'go.mod'
+          go-version-file: go.mod
 
       - name: Run GoReleaser
         if: steps.get-tag.outputs.skip != 'true'
