@@ -2,152 +2,261 @@
 
 A lightweight, open-source Snowflake emulator built with Go and DuckDB, designed for local development and testing.
 
-[![Test and Coverage](https://github.com/nnnkkk7/snowflake-emurator/workflows/Test%20and%20Coverage/badge.svg)](https://github.com/nnnkkk7/snowflake-emurator/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nnnkkk7/snowflake-emurator)](https://goreportcard.com/report/github.com/nnnkkk7/snowflake-emurator)
+[![CI](https://github.com/nnnkkk7/snowflake-emulator/workflows/CI/badge.svg)](https://github.com/nnnkkk7/snowflake-emulator/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/nnnkkk7/snowflake-emulator)](https://goreportcard.com/report/github.com/nnnkkk7/snowflake-emulator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
 Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckDB, enabling developers to:
 
-- Test Snowflake SQL queries locally without cloud costs
-- Develop and debug applications using Snowflake syntax
-- Run CI/CD pipelines with realistic test data
-- Learn Snowflake SQL in a local environment
+- **Test locally** - Run Snowflake SQL queries without cloud costs
+- **CI/CD integration** - Automated testing with realistic Snowflake syntax
+- **Rapid development** - No network latency, instant query feedback
+- **gosnowflake compatible** - Works with the official Go driver out of the box
 
+## Features
 
-### Implemented Features
+### Core Capabilities
 
-- ✅ Snowflake type system with DuckDB conversion
-- ✅ Thread-safe connection management
-- ✅ Metadata management (Database/Schema/Table)
-- ✅ SQL translation (IFF, NVL, CONCAT functions)
-- ✅ Query execution engine
-- ✅ Session management with token authentication
-- ✅ Snowflake-compatible error handling
-- ✅ HTTP API handlers (login, query execution)
-- ✅ Comprehensive test coverage
-- ✅ CI/CD pipeline (GitHub Actions)
-- ✅ Docker support
+- **gosnowflake Driver Support** - Full compatibility with the official Snowflake Go driver
+- **REST API v2** - SQL statements API for language-agnostic access
+- **SQL Translation** - Automatic Snowflake SQL to DuckDB conversion
+- **COPY INTO Support** - Load data from internal stages (CSV, JSON)
+- **Metadata Management** - Database, Schema, Table, Stage, Warehouse tracking
+- **Session Management** - Token-based authentication (development mode)
+
+### Supported SQL Functions
+
+| Snowflake | DuckDB | Description |
+|-----------|--------|-------------|
+| `IFF(cond, t, f)` | `IF(cond, t, f)` | Conditional expression |
+| `NVL(a, b)` | `COALESCE(a, b)` | Null value substitution |
+| `NVL2(a, b, c)` | `IF(a IS NOT NULL, b, c)` | Null conditional |
+| `IFNULL(a, b)` | `COALESCE(a, b)` | Null value substitution |
+| `DATEADD(part, n, date)` | `date + INTERVAL n part` | Date arithmetic |
+| `DATEDIFF(part, start, end)` | `DATE_DIFF('part', start, end)` | Date difference |
+| `TO_VARIANT(x)` | `CAST(x AS JSON)` | Convert to variant |
+| `PARSE_JSON(str)` | `CAST(str AS JSON)` | Parse JSON string |
+| `OBJECT_CONSTRUCT(...)` | `json_object(...)` | Build JSON object |
+| `LISTAGG(col, sep)` | `STRING_AGG(col, sep)` | String aggregation |
+| `FLATTEN(...)` | `UNNEST(...)` | Array expansion |
+
+### Supported Data Types
+
+| Snowflake Type | DuckDB Type |
+|----------------|-------------|
+| NUMBER, NUMERIC, DECIMAL | DOUBLE / DECIMAL(p,s) |
+| INTEGER, BIGINT, SMALLINT, TINYINT | INTEGER / BIGINT |
+| FLOAT, DOUBLE, REAL | DOUBLE |
+| VARCHAR, STRING, TEXT, CHAR | VARCHAR |
+| BOOLEAN | BOOLEAN |
+| DATE | DATE |
+| TIME | TIME |
+| TIMESTAMP, TIMESTAMP_NTZ | TIMESTAMP |
+| TIMESTAMP_LTZ, TIMESTAMP_TZ | TIMESTAMPTZ |
+| VARIANT, OBJECT | JSON |
+| ARRAY | JSON |
+| BINARY, VARBINARY | BLOB |
+| GEOGRAPHY, GEOMETRY | VARCHAR (WKT) |
 
 ## Quick Start
 
-### Docker
+### Prerequisites
+
+- Go 1.24+
+- GCC (for DuckDB CGO)
+
+### Installation
 
 ```bash
-docker pull snowflake-emulator:phase1
-docker run -p 8080:8080 snowflake-emulator:phase1
-```
-
-### Local Build
-
-```bash
-# Prerequisites: Go 1.24+, GCC
-git clone https://github.com/nnnkkk7/snowflake-emurator.git
-cd snowflake-emurator
+git clone https://github.com/nnnkkk7/snowflake-emulator.git
+cd snowflake-emulator
 go build -o snowflake-emulator ./cmd/server
-./snowflake-emulator
 ```
 
-### Usage Example
+### Run the Server
 
 ```bash
-# 1. Login
-curl -X POST http://localhost:8080/session/v1/login-request \
+# In-memory mode (default)
+./snowflake-emulator
+
+# With persistent storage
+DB_PATH=/path/to/database.db ./snowflake-emulator
+
+# Custom port
+PORT=9090 ./snowflake-emulator
+```
+
+### Using with gosnowflake Driver
+
+```go
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+
+    _ "github.com/snowflakedb/gosnowflake"
+)
+
+func main() {
+    // Connect to local emulator
+    dsn := "user:pass@localhost:8080/TEST_DB/PUBLIC?account=test&protocol=http"
+    db, err := sql.Open("snowflake", dsn)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    // Execute Snowflake SQL (automatically translated)
+    rows, err := db.Query(`
+        SELECT
+            name,
+            IFF(score >= 90, 'A', 'B') AS grade,
+            NVL(email, 'no-email') AS email
+        FROM users
+    `)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var name, grade, email string
+        rows.Scan(&name, &grade, &email)
+        fmt.Printf("%s: %s (%s)\n", name, grade, email)
+    }
+}
+```
+
+### Using REST API v2
+
+```bash
+# Submit a SQL statement
+curl -X POST http://localhost:8080/api/v2/statements \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "testuser",
-    "password": "testpass",
+    "statement": "SELECT IFF(1 > 0, '\''yes'\'', '\''no'\'')",
     "database": "TEST_DB",
     "schema": "PUBLIC"
   }'
 
-# Response: {"success":true,"token":"abc123...","sessionId":"uuid",...}
+# Get statement result
+curl http://localhost:8080/api/v2/statements/{handle}
 
-# 2. Execute Query
-curl -X POST http://localhost:8080/queries/v1/query-request \
+# Create a database
+curl -X POST http://localhost:8080/api/v2/databases \
   -H "Content-Type: application/json" \
-  -H "Authorization: Snowflake Token=\"abc123...\"" \
-  -d '{
-    "statement": "SELECT IFF(value > 100, '\''High'\'', '\''Low'\'') FROM test_table"
-  }'
+  -d '{"name": "MY_DB"}'
 
-# 3. Logout
-curl -X POST http://localhost:8080/session/logout \
-  -H "Content-Type: application/json" \
-  -d '{"token":"abc123..."}'
+# List warehouses
+curl http://localhost:8080/api/v2/warehouses
 ```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP server port |
+| `DB_PATH` | `:memory:` | DuckDB database path (empty for in-memory) |
+| `STAGE_DIR` | `./stages` | Directory for internal stage files |
+
+## API Endpoints
+
+### gosnowflake Protocol
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/session/v1/login-request` | POST | Session login |
+| `/session/token-request` | POST | Token refresh |
+| `/session/heartbeat` | POST | Keep-alive |
+| `/session/renew` | POST | Renew session |
+| `/session/logout` | POST | Logout |
+| `/session/use` | POST | USE DATABASE/SCHEMA |
+| `/queries/v1/query-request` | POST | Execute SQL query |
+| `/queries/v1/abort-request` | POST | Cancel query |
+
+### REST API v2
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v2/statements` | POST | Submit SQL statement |
+| `/api/v2/statements/{handle}` | GET | Get statement status/result |
+| `/api/v2/statements/{handle}/cancel` | POST | Cancel statement |
+| `/api/v2/databases` | GET, POST | List/Create databases |
+| `/api/v2/databases/{db}` | GET, DELETE | Get/Drop database |
+| `/api/v2/databases/{db}/schemas` | GET, POST | List/Create schemas |
+| `/api/v2/databases/{db}/schemas/{schema}` | GET, DELETE | Get/Drop schema |
+| `/api/v2/databases/{db}/schemas/{schema}/tables` | GET | List tables |
+| `/api/v2/databases/{db}/schemas/{schema}/tables/{table}` | GET, DELETE | Get/Drop table |
+| `/api/v2/warehouses` | GET, POST | List/Create warehouses |
+| `/api/v2/warehouses/{wh}` | GET, DELETE | Get/Drop warehouse |
+| `/api/v2/warehouses/{wh}:resume` | POST | Resume warehouse |
+| `/api/v2/warehouses/{wh}:suspend` | POST | Suspend warehouse |
+| `/health` | GET | Health check |
 
 ## Architecture
 
-```text
+```
 snowflake-emulator/
+├── cmd/server/              # Application entry point
 ├── pkg/
-│   ├── config/          # Configuration constants (NEW)
-│   ├── connection/      # DuckDB connection manager
-│   ├── contentdata/     # Table data management
-│   ├── metadata/        # Database/Schema/Table repository
-│   ├── query/           # SQL translator, executor, classifier, type_mapper
+│   ├── config/              # Configuration constants
+│   ├── connection/          # DuckDB connection manager (thread-safe)
+│   ├── contentdata/         # Table content data operations
+│   ├── metadata/            # Database/Schema/Table/Stage metadata
+│   ├── query/
 │   │   ├── executor.go      # Query execution engine
-│   │   ├── translator.go    # Snowflake → DuckDB translation
-│   │   ├── classifier.go    # SQL statement classification (NEW)
-│   │   └── type_mapper.go   # DuckDB → Snowflake type mapping (NEW)
-│   ├── session/         # Session & token management
-│   ├── types/           # Snowflake type system with DuckDB mapping
-│   └── warehouse/       # Virtual warehouse management
+│   │   ├── translator.go    # Snowflake → DuckDB SQL translation (AST-based)
+│   │   ├── classifier.go    # SQL statement classification
+│   │   ├── copy_handler.go  # COPY INTO implementation
+│   │   ├── statement_manager.go # Statement lifecycle management
+│   │   └── type_mapper.go   # DuckDB → Snowflake type mapping
+│   ├── session/             # Session & token management
+│   ├── stage/               # Internal stage file operations
+│   ├── types/               # Snowflake type definitions
+│   └── warehouse/           # Virtual warehouse management
 ├── server/
-│   ├── apierror/        # Snowflake error codes & responses
-│   ├── handlers/        # HTTP request handlers
-│   └── types/           # API request/response types
-├── tests/
-│   └── integration/     # Integration tests
-└── cmd/server/          # Main application
+│   ├── apierror/            # Snowflake-compatible error responses
+│   ├── handlers/            # HTTP request handlers
+│   └── types/               # API request/response types
+└── tests/
+    ├── e2e/                 # End-to-end tests (gosnowflake driver)
+    └── integration/         # Integration tests
 ```
 
-## Supported SQL Features
+### Layer Design
 
-### Functions
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| HTTP Server | `server/`, `server/handlers/` | REST endpoints, routing |
+| Service | `pkg/query/`, `pkg/session/` | Business logic, SQL execution |
+| Repository | `pkg/metadata/`, `pkg/contentdata/` | Data access abstraction |
+| Storage | `pkg/connection/` | DuckDB connection management |
 
-- `IFF(condition, true_value, false_value)` → `CASE WHEN`
-- `NVL(value, default)` → `COALESCE`
-- `CONCAT(str1, str2, ...)` → `||` operator
 
-### Data Types
 
-- INTEGER, BIGINT, SMALLINT
-- FLOAT, DOUBLE, DECIMAL, NUMBER
-- VARCHAR, STRING, TEXT
-- BOOLEAN
-- DATE, TIMESTAMP, TIME
+## Limitations
 
-### DDL Operations
+This emulator is designed for development and testing. The following features are not supported:
 
-- CREATE/DROP DATABASE
-- CREATE/DROP SCHEMA
-- CREATE/DROP TABLE
+- Authentication/Authorization (skipped in dev mode)
+- Distributed processing / Clustering
+- Time Travel / Zero-Copy Cloning
+- Streams, Tasks, Pipes
+- External stages (S3, Azure, GCS)
+- Stored procedures with JavaScript
+- User-defined functions
 
-### DML Operations
+## Contributing
 
-- SELECT queries
-- INSERT statements
-- UPDATE statements
-- DELETE statements
-
-## Testing
-
-### Run All Tests
-
-```bash
-go test ./...
-```
-
-### Run with Coverage
-
-```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details
+[MIT](LICENSE)
 
