@@ -339,14 +339,14 @@ func TestTranslator_ComplexQuery(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name: "NestedIFF_NVL",
-			input: `SELECT IFF(status = 'active', NVL(name, 'Unknown'), 'Inactive') FROM users`,
+			name:     "NestedIFF_NVL",
+			input:    `SELECT IFF(status = 'active', NVL(name, 'Unknown'), 'Inactive') FROM users`,
 			expected: "select IF(status = 'active', COALESCE(name, 'Unknown'), 'Inactive') from users",
 			wantErr:  false,
 		},
 		{
-			name: "MultipleNVL_WithIFF",
-			input: `SELECT NVL(first_name, 'N/A'), NVL(last_name, 'N/A'), IFF(active, 1, 0) FROM people`,
+			name:     "MultipleNVL_WithIFF",
+			input:    `SELECT NVL(first_name, 'N/A'), NVL(last_name, 'N/A'), IFF(active, 1, 0) FROM people`,
 			expected: "select COALESCE(first_name, 'N/A'), COALESCE(last_name, 'N/A'), IF(active, 1, 0) from people",
 			wantErr:  false,
 		},
@@ -923,9 +923,9 @@ func TestTranslator_PassThrough(t *testing.T) {
 // TestTranslator_ErrorCases tests error handling and edge cases.
 func TestTranslator_ErrorCases(t *testing.T) {
 	tests := []struct {
-		name            string
-		input           string
-		wantErr         bool
+		name             string
+		input            string
+		wantErr          bool
 		expectedContains string // For graceful degradation, check if result contains this
 	}{
 		{

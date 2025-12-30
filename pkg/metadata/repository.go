@@ -60,6 +60,44 @@ type ColumnDef struct {
 	PrimaryKey bool
 }
 
+// Stage represents a Snowflake stage for data loading.
+type Stage struct {
+	ID        string
+	SchemaID  string
+	Name      string
+	StageType string // INTERNAL, EXTERNAL
+	URL       string // For external stages
+	Comment   string
+	CreatedAt time.Time
+	Owner     string
+}
+
+// FileFormat represents a Snowflake file format.
+type FileFormat struct {
+	ID         string
+	SchemaID   string
+	Name       string
+	FormatType string // CSV, JSON, PARQUET
+	Options    string // JSON encoded options
+	Comment    string
+	CreatedAt  time.Time
+	Owner      string
+}
+
+// QueryHistoryEntry represents a query execution record.
+type QueryHistoryEntry struct {
+	ID              string
+	SessionID       string
+	QueryID         string
+	SQLText         string
+	Status          string // RUNNING, SUCCESS, FAILED, CANCELED
+	RowsAffected    int64
+	ExecutionTimeMs int64
+	ErrorMessage    string
+	StartedAt       time.Time
+	CompletedAt     *time.Time
+}
+
 // NewRepository creates a new metadata repository.
 // It initializes metadata tables if they don't exist.
 func NewRepository(mgr *connection.Manager) (*Repository, error) {
@@ -106,6 +144,40 @@ func (r *Repository) initMetadataTables(ctx context.Context) error {
 			column_definitions VARCHAR,
 			UNIQUE(schema_id, name)
 		)`,
+		`CREATE TABLE IF NOT EXISTS _metadata_stages (
+			id VARCHAR PRIMARY KEY,
+			schema_id VARCHAR NOT NULL,
+			name VARCHAR NOT NULL,
+			stage_type VARCHAR DEFAULT 'INTERNAL',
+			url VARCHAR,
+			comment VARCHAR,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			owner VARCHAR,
+			UNIQUE(schema_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS _metadata_fileformats (
+			id VARCHAR PRIMARY KEY,
+			schema_id VARCHAR NOT NULL,
+			name VARCHAR NOT NULL,
+			format_type VARCHAR NOT NULL,
+			options VARCHAR,
+			comment VARCHAR,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			owner VARCHAR,
+			UNIQUE(schema_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS _metadata_query_history (
+			id VARCHAR PRIMARY KEY,
+			session_id VARCHAR,
+			query_id VARCHAR,
+			sql_text TEXT,
+			status VARCHAR NOT NULL,
+			rows_affected BIGINT DEFAULT 0,
+			execution_time_ms BIGINT DEFAULT 0,
+			error_message TEXT,
+			started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			completed_at TIMESTAMP
+		)`,
 	}
 
 	for _, query := range queries {
@@ -151,7 +223,6 @@ func (r *Repository) CreateDatabase(ctx context.Context, name, comment string) (
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +451,39 @@ func (r *Repository) GetSchema(ctx context.Context, id string) (*Schema, error) 
 	return &schema, nil
 }
 
+// GetSchemaByName retrieves a schema by database ID and name.
+func (r *Repository) GetSchemaByName(ctx context.Context, databaseID, name string) (*Schema, error) {
+	query := `SELECT id, database_id, name, comment, created_at, owner
+	          FROM _metadata_schemas WHERE database_id = ? AND name = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, databaseID, strings.ToUpper(name))
+
+	var schema Schema
+	var createdAt sql.NullTime
+	var comment sql.NullString
+	var owner sql.NullString
+
+	err := row.Scan(&schema.ID, &schema.DatabaseID, &schema.Name, &comment, &createdAt, &owner)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("schema %s not found", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema: %w", err)
+	}
+
+	if comment.Valid {
+		schema.Comment = comment.String
+	}
+	if createdAt.Valid {
+		schema.CreatedAt = createdAt.Time
+	}
+	if owner.Valid {
+		schema.Owner = owner.String
+	}
+
+	return &schema, nil
+}
+
 // ListSchemas retrieves all schemas in a database.
 func (r *Repository) ListSchemas(ctx context.Context, databaseID string) ([]*Schema, error) {
 	query := `SELECT id, database_id, name, comment, created_at, owner
@@ -528,7 +632,6 @@ func (r *Repository) CreateTable(ctx context.Context, schemaID, name string, col
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -554,6 +657,47 @@ func (r *Repository) GetTable(ctx context.Context, id string) (*Table, error) {
 	err := row.Scan(&table.ID, &table.SchemaID, &table.Name, &table.TableType, &comment, &createdAt, &owner, &clusteringKey, &columnDefinitions)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("table with ID %s not found", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table: %w", err)
+	}
+
+	if comment.Valid {
+		table.Comment = comment.String
+	}
+	if createdAt.Valid {
+		table.CreatedAt = createdAt.Time
+	}
+	if owner.Valid {
+		table.Owner = owner.String
+	}
+	if clusteringKey.Valid {
+		table.ClusteringKey = clusteringKey.String
+	}
+	if columnDefinitions.Valid {
+		table.ColumnDefinitions = columnDefinitions.String
+	}
+
+	return &table, nil
+}
+
+// GetTableByName retrieves a table by schema ID and name.
+func (r *Repository) GetTableByName(ctx context.Context, schemaID, name string) (*Table, error) {
+	query := `SELECT id, schema_id, name, table_type, comment, created_at, owner, clustering_key, column_definitions
+	          FROM _metadata_tables WHERE schema_id = ? AND name = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, schemaID, strings.ToUpper(name))
+
+	var table Table
+	var createdAt sql.NullTime
+	var comment sql.NullString
+	var owner sql.NullString
+	var clusteringKey sql.NullString
+	var columnDefinitions sql.NullString
+
+	err := row.Scan(&table.ID, &table.SchemaID, &table.Name, &table.TableType, &comment, &createdAt, &owner, &clusteringKey, &columnDefinitions)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("table %s not found", name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table: %w", err)
@@ -699,4 +843,496 @@ func serializeColumnDefs(columns []ColumnDef) string {
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, ";")
+}
+
+// Stage CRUD Operations
+
+// CreateStage creates a new stage in the specified schema.
+func (r *Repository) CreateStage(ctx context.Context, schemaID, name, stageType, url, comment string) (*Stage, error) {
+	if name == "" {
+		return nil, fmt.Errorf("stage name cannot be empty")
+	}
+
+	normalizedName := strings.ToUpper(name)
+	if stageType == "" {
+		stageType = "INTERNAL"
+	}
+
+	id := uuid.New().String()
+
+	query := `INSERT INTO _metadata_stages (id, schema_id, name, stage_type, url, comment, created_at, owner)
+	          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
+	_, err := r.mgr.Exec(ctx, query, id, schemaID, normalizedName, stageType, url, comment, "")
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Constraint Error") {
+			return nil, fmt.Errorf("stage %s already exists", normalizedName)
+		}
+		return nil, fmt.Errorf("failed to create stage: %w", err)
+	}
+
+	return r.GetStage(ctx, id)
+}
+
+// GetStage retrieves a stage by ID.
+func (r *Repository) GetStage(ctx context.Context, id string) (*Stage, error) {
+	query := `SELECT id, schema_id, name, stage_type, url, comment, created_at, owner
+	          FROM _metadata_stages WHERE id = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, id)
+
+	var stage Stage
+	var createdAt sql.NullTime
+	var comment, url, owner sql.NullString
+
+	err := row.Scan(&stage.ID, &stage.SchemaID, &stage.Name, &stage.StageType, &url, &comment, &createdAt, &owner)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("stage with ID %s not found", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stage: %w", err)
+	}
+
+	if createdAt.Valid {
+		stage.CreatedAt = createdAt.Time
+	}
+	if comment.Valid {
+		stage.Comment = comment.String
+	}
+	if url.Valid {
+		stage.URL = url.String
+	}
+	if owner.Valid {
+		stage.Owner = owner.String
+	}
+
+	return &stage, nil
+}
+
+// GetStageByName retrieves a stage by schema ID and name.
+func (r *Repository) GetStageByName(ctx context.Context, schemaID, name string) (*Stage, error) {
+	normalizedName := strings.ToUpper(name)
+	query := `SELECT id, schema_id, name, stage_type, url, comment, created_at, owner
+	          FROM _metadata_stages WHERE schema_id = ? AND name = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, schemaID, normalizedName)
+
+	var stage Stage
+	var createdAt sql.NullTime
+	var comment, url, owner sql.NullString
+
+	err := row.Scan(&stage.ID, &stage.SchemaID, &stage.Name, &stage.StageType, &url, &comment, &createdAt, &owner)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("stage %s not found", normalizedName)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stage: %w", err)
+	}
+
+	if createdAt.Valid {
+		stage.CreatedAt = createdAt.Time
+	}
+	if comment.Valid {
+		stage.Comment = comment.String
+	}
+	if url.Valid {
+		stage.URL = url.String
+	}
+	if owner.Valid {
+		stage.Owner = owner.String
+	}
+
+	return &stage, nil
+}
+
+// ListStages returns all stages in a schema.
+func (r *Repository) ListStages(ctx context.Context, schemaID string) ([]*Stage, error) {
+	query := `SELECT id, schema_id, name, stage_type, url, comment, created_at, owner
+	          FROM _metadata_stages WHERE schema_id = ? ORDER BY name`
+
+	rows, err := r.mgr.DB().QueryContext(ctx, query, schemaID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list stages: %w", err)
+	}
+	defer rows.Close()
+
+	var stages []*Stage
+	for rows.Next() {
+		var stage Stage
+		var createdAt sql.NullTime
+		var comment, url, owner sql.NullString
+
+		if err := rows.Scan(&stage.ID, &stage.SchemaID, &stage.Name, &stage.StageType, &url, &comment, &createdAt, &owner); err != nil {
+			return nil, fmt.Errorf("failed to scan stage: %w", err)
+		}
+
+		if createdAt.Valid {
+			stage.CreatedAt = createdAt.Time
+		}
+		if comment.Valid {
+			stage.Comment = comment.String
+		}
+		if url.Valid {
+			stage.URL = url.String
+		}
+		if owner.Valid {
+			stage.Owner = owner.String
+		}
+
+		stages = append(stages, &stage)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stages: %w", err)
+	}
+
+	return stages, nil
+}
+
+// DropStage deletes a stage by ID.
+func (r *Repository) DropStage(ctx context.Context, id string) error {
+	query := `DELETE FROM _metadata_stages WHERE id = ?`
+	result, err := r.mgr.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to drop stage: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("stage with ID %s not found", id)
+	}
+
+	return nil
+}
+
+// FileFormat CRUD Operations
+
+// CreateFileFormat creates a new file format in the specified schema.
+func (r *Repository) CreateFileFormat(ctx context.Context, schemaID, name, formatType, options, comment string) (*FileFormat, error) {
+	if name == "" {
+		return nil, fmt.Errorf("file format name cannot be empty")
+	}
+
+	normalizedName := strings.ToUpper(name)
+	id := uuid.New().String()
+
+	query := `INSERT INTO _metadata_fileformats (id, schema_id, name, format_type, options, comment, created_at, owner)
+	          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
+	_, err := r.mgr.Exec(ctx, query, id, schemaID, normalizedName, formatType, options, comment, "")
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Constraint Error") {
+			return nil, fmt.Errorf("file format %s already exists", normalizedName)
+		}
+		return nil, fmt.Errorf("failed to create file format: %w", err)
+	}
+
+	return r.GetFileFormat(ctx, id)
+}
+
+// GetFileFormat retrieves a file format by ID.
+func (r *Repository) GetFileFormat(ctx context.Context, id string) (*FileFormat, error) {
+	query := `SELECT id, schema_id, name, format_type, options, comment, created_at, owner
+	          FROM _metadata_fileformats WHERE id = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, id)
+
+	var ff FileFormat
+	var createdAt sql.NullTime
+	var options, comment, owner sql.NullString
+
+	err := row.Scan(&ff.ID, &ff.SchemaID, &ff.Name, &ff.FormatType, &options, &comment, &createdAt, &owner)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("file format with ID %s not found", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file format: %w", err)
+	}
+
+	if createdAt.Valid {
+		ff.CreatedAt = createdAt.Time
+	}
+	if options.Valid {
+		ff.Options = options.String
+	}
+	if comment.Valid {
+		ff.Comment = comment.String
+	}
+	if owner.Valid {
+		ff.Owner = owner.String
+	}
+
+	return &ff, nil
+}
+
+// GetFileFormatByName retrieves a file format by schema ID and name.
+func (r *Repository) GetFileFormatByName(ctx context.Context, schemaID, name string) (*FileFormat, error) {
+	normalizedName := strings.ToUpper(name)
+	query := `SELECT id, schema_id, name, format_type, options, comment, created_at, owner
+	          FROM _metadata_fileformats WHERE schema_id = ? AND name = ?`
+
+	row := r.mgr.DB().QueryRowContext(ctx, query, schemaID, normalizedName)
+
+	var ff FileFormat
+	var createdAt sql.NullTime
+	var options, comment, owner sql.NullString
+
+	err := row.Scan(&ff.ID, &ff.SchemaID, &ff.Name, &ff.FormatType, &options, &comment, &createdAt, &owner)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("file format %s not found", normalizedName)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file format: %w", err)
+	}
+
+	if createdAt.Valid {
+		ff.CreatedAt = createdAt.Time
+	}
+	if options.Valid {
+		ff.Options = options.String
+	}
+	if comment.Valid {
+		ff.Comment = comment.String
+	}
+	if owner.Valid {
+		ff.Owner = owner.String
+	}
+
+	return &ff, nil
+}
+
+// ListFileFormats returns all file formats in a schema.
+func (r *Repository) ListFileFormats(ctx context.Context, schemaID string) ([]*FileFormat, error) {
+	query := `SELECT id, schema_id, name, format_type, options, comment, created_at, owner
+	          FROM _metadata_fileformats WHERE schema_id = ? ORDER BY name`
+
+	rows, err := r.mgr.DB().QueryContext(ctx, query, schemaID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list file formats: %w", err)
+	}
+	defer rows.Close()
+
+	var fileFormats []*FileFormat
+	for rows.Next() {
+		var ff FileFormat
+		var createdAt sql.NullTime
+		var options, comment, owner sql.NullString
+
+		if err := rows.Scan(&ff.ID, &ff.SchemaID, &ff.Name, &ff.FormatType, &options, &comment, &createdAt, &owner); err != nil {
+			return nil, fmt.Errorf("failed to scan file format: %w", err)
+		}
+
+		if createdAt.Valid {
+			ff.CreatedAt = createdAt.Time
+		}
+		if options.Valid {
+			ff.Options = options.String
+		}
+		if comment.Valid {
+			ff.Comment = comment.String
+		}
+		if owner.Valid {
+			ff.Owner = owner.String
+		}
+
+		fileFormats = append(fileFormats, &ff)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate file formats: %w", err)
+	}
+
+	return fileFormats, nil
+}
+
+// DropFileFormat deletes a file format by ID.
+func (r *Repository) DropFileFormat(ctx context.Context, id string) error {
+	query := `DELETE FROM _metadata_fileformats WHERE id = ?`
+	result, err := r.mgr.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to drop file format: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("file format with ID %s not found", id)
+	}
+
+	return nil
+}
+
+// Query History Operations
+
+// RecordQueryStart records the start of a query execution.
+func (r *Repository) RecordQueryStart(ctx context.Context, sessionID, queryID, sqlText string) (*QueryHistoryEntry, error) {
+	id := uuid.New().String()
+	now := time.Now()
+
+	query := `INSERT INTO _metadata_query_history (id, session_id, query_id, sql_text, status, started_at)
+		VALUES (?, ?, ?, ?, 'RUNNING', ?)`
+
+	if _, err := r.mgr.Exec(ctx, query, id, sessionID, queryID, sqlText, now); err != nil {
+		return nil, fmt.Errorf("failed to record query start: %w", err)
+	}
+
+	return &QueryHistoryEntry{
+		ID:        id,
+		SessionID: sessionID,
+		QueryID:   queryID,
+		SQLText:   sqlText,
+		Status:    "RUNNING",
+		StartedAt: now,
+	}, nil
+}
+
+// RecordQuerySuccess records a successful query completion.
+func (r *Repository) RecordQuerySuccess(ctx context.Context, id string, rowsAffected int64, executionTimeMs int64) error {
+	now := time.Now()
+	query := `UPDATE _metadata_query_history
+		SET status = 'SUCCESS', rows_affected = ?, execution_time_ms = ?, completed_at = ?
+		WHERE id = ?`
+
+	if _, err := r.mgr.Exec(ctx, query, rowsAffected, executionTimeMs, now, id); err != nil {
+		return fmt.Errorf("failed to record query success: %w", err)
+	}
+
+	return nil
+}
+
+// RecordQueryFailure records a failed query completion.
+func (r *Repository) RecordQueryFailure(ctx context.Context, id string, errorMessage string, executionTimeMs int64) error {
+	now := time.Now()
+	query := `UPDATE _metadata_query_history
+		SET status = 'FAILED', error_message = ?, execution_time_ms = ?, completed_at = ?
+		WHERE id = ?`
+
+	if _, err := r.mgr.Exec(ctx, query, errorMessage, executionTimeMs, now, id); err != nil {
+		return fmt.Errorf("failed to record query failure: %w", err)
+	}
+
+	return nil
+}
+
+// GetQueryHistory retrieves query history with optional limit.
+func (r *Repository) GetQueryHistory(ctx context.Context, limit int) ([]*QueryHistoryEntry, error) {
+	if limit <= 0 {
+		limit = 100 // Default limit
+	}
+
+	query := `SELECT id, session_id, query_id, sql_text, status, rows_affected,
+		execution_time_ms, error_message, started_at, completed_at
+		FROM _metadata_query_history
+		ORDER BY started_at DESC
+		LIMIT ?`
+
+	rows, err := r.mgr.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query history: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*QueryHistoryEntry
+	for rows.Next() {
+		var entry QueryHistoryEntry
+		var sessionID, queryID, errorMessage sql.NullString
+		var completedAt sql.NullTime
+
+		err := rows.Scan(
+			&entry.ID,
+			&sessionID,
+			&queryID,
+			&entry.SQLText,
+			&entry.Status,
+			&entry.RowsAffected,
+			&entry.ExecutionTimeMs,
+			&errorMessage,
+			&entry.StartedAt,
+			&completedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan query history row: %w", err)
+		}
+
+		entry.SessionID = sessionID.String
+		entry.QueryID = queryID.String
+		entry.ErrorMessage = errorMessage.String
+		if completedAt.Valid {
+			entry.CompletedAt = &completedAt.Time
+		}
+
+		entries = append(entries, &entry)
+	}
+
+	return entries, nil
+}
+
+// GetQueryHistoryBySession retrieves query history for a specific session.
+func (r *Repository) GetQueryHistoryBySession(ctx context.Context, sessionID string, limit int) ([]*QueryHistoryEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `SELECT id, session_id, query_id, sql_text, status, rows_affected,
+		execution_time_ms, error_message, started_at, completed_at
+		FROM _metadata_query_history
+		WHERE session_id = ?
+		ORDER BY started_at DESC
+		LIMIT ?`
+
+	rows, err := r.mgr.Query(ctx, query, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query history by session: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*QueryHistoryEntry
+	for rows.Next() {
+		var entry QueryHistoryEntry
+		var sessionIDVal, queryID, errorMessage sql.NullString
+		var completedAt sql.NullTime
+
+		err := rows.Scan(
+			&entry.ID,
+			&sessionIDVal,
+			&queryID,
+			&entry.SQLText,
+			&entry.Status,
+			&entry.RowsAffected,
+			&entry.ExecutionTimeMs,
+			&errorMessage,
+			&entry.StartedAt,
+			&completedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan query history row: %w", err)
+		}
+
+		entry.SessionID = sessionIDVal.String
+		entry.QueryID = queryID.String
+		entry.ErrorMessage = errorMessage.String
+		if completedAt.Valid {
+			entry.CompletedAt = &completedAt.Time
+		}
+
+		entries = append(entries, &entry)
+	}
+
+	return entries, nil
+}
+
+// ClearQueryHistory removes old query history entries.
+func (r *Repository) ClearQueryHistory(ctx context.Context, olderThan time.Time) (int64, error) {
+	query := `DELETE FROM _metadata_query_history WHERE started_at < ?`
+	result, err := r.mgr.Exec(ctx, query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear query history: %w", err)
+	}
+
+	return result.RowsAffected()
 }

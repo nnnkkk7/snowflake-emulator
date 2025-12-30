@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/query"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/session"
+	"github.com/nnnkkk7/snowflake-emulator/pkg/stage"
 	"github.com/nnnkkk7/snowflake-emulator/server/handlers"
 )
 
@@ -714,4 +716,179 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	if success, ok := sqlErrResp["success"].(bool); ok && success {
 		t.Error("Expected error for invalid SQL")
 	}
+}
+
+// TestIntegration_CopyInto tests COPY INTO functionality end-to-end.
+func TestIntegration_CopyInto(t *testing.T) {
+	// Setup
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Create database, schema, stage
+	database, err := repo.CreateDatabase(ctx, "COPY_TEST_DB", "")
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+
+	schema, err := repo.CreateSchema(ctx, database.ID, "PUBLIC", "")
+	if err != nil {
+		t.Fatalf("failed to create schema: %v", err)
+	}
+
+	// Create temp directory for stages
+	stageDir, err := os.MkdirTemp("", "snowflake-stage-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(stageDir)
+
+	stageMgr := stage.NewManager(repo, stageDir)
+	executor := query.NewExecutor(mgr, repo)
+	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
+	executor.SetCopyHandler(copyHandler)
+
+	// Create stage
+	_, err = stageMgr.CreateStage(ctx, schema.ID, "TEST_STAGE", "INTERNAL", "", "")
+	if err != nil {
+		t.Fatalf("failed to create stage: %v", err)
+	}
+
+	// Create target table via repository (creates both metadata and DuckDB table)
+	columns := []metadata.ColumnDef{
+		{Name: "ID", Type: "INTEGER"},
+		{Name: "NAME", Type: "VARCHAR"},
+		{Name: "VALUE", Type: "DOUBLE"},
+	}
+	_, err = repo.CreateTable(ctx, schema.ID, "COPY_TARGET", columns, "Test table for COPY INTO")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Put CSV file in stage
+	csvData := `1,Alice,10.5
+2,Bob,20.0
+3,Charlie,30.5`
+	err = stageMgr.PutFile(ctx, schema.ID, "TEST_STAGE", "data.csv", bytes.NewReader([]byte(csvData)))
+	if err != nil {
+		t.Fatalf("failed to put file: %v", err)
+	}
+
+	// Execute COPY INTO via executor (use 3-part name: database.schema.table)
+	result, err := executor.Execute(ctx, "COPY INTO COPY_TEST_DB.PUBLIC.COPY_TARGET FROM @TEST_STAGE FILE_FORMAT = (TYPE = CSV FIELD_DELIMITER = ',')")
+	if err != nil {
+		t.Fatalf("COPY INTO failed: %v", err)
+	}
+
+	if result.RowsAffected != 3 {
+		t.Errorf("Expected 3 rows loaded, got %d", result.RowsAffected)
+	}
+
+	// Verify data was loaded (use DB.SCHEMA_TABLE naming convention)
+	queryResult, err := executor.Query(ctx, "SELECT * FROM COPY_TEST_DB.PUBLIC_COPY_TARGET ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+
+	if len(queryResult.Rows) != 3 {
+		t.Errorf("Expected 3 rows in table, got %d", len(queryResult.Rows))
+	}
+
+	t.Logf("COPY INTO successfully loaded %d rows", len(queryResult.Rows))
+}
+
+// TestIntegration_QueryHistory tests query history tracking end-to-end.
+func TestIntegration_QueryHistory(t *testing.T) {
+	// Setup
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	ctx := context.Background()
+	executor := query.NewExecutor(mgr, repo)
+
+	// Create test database (schema not needed for this test)
+	_, err = repo.CreateDatabase(ctx, "HISTORY_DB", "")
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+
+	// Execute queries with history tracking
+	sessionID := "test-session-123"
+	queryID1 := "query-001"
+	queryID2 := "query-002"
+	queryID3 := "query-003"
+
+	// Query 1: Successful SELECT
+	_, err = executor.QueryWithHistory(ctx, sessionID, queryID1, "SELECT 1 AS test")
+	if err != nil {
+		t.Fatalf("Query 1 failed: %v", err)
+	}
+
+	// Query 2: Successful DDL (use simple table name that DuckDB can handle)
+	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)")
+	if err != nil {
+		t.Fatalf("Query 2 failed: %v", err)
+	}
+
+	// Query 3: Failed query
+	_, _ = executor.QueryWithHistory(ctx, sessionID, queryID3, "SELECT * FROM NONEXISTENT_TABLE")
+
+	// Verify history was recorded
+	history, err := repo.GetQueryHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistory failed: %v", err)
+	}
+
+	if len(history) < 3 {
+		t.Errorf("Expected at least 3 history entries, got %d", len(history))
+	}
+
+	// Verify by session
+	sessionHistory, err := repo.GetQueryHistoryBySession(ctx, sessionID, 10)
+	if err != nil {
+		t.Fatalf("GetQueryHistoryBySession failed: %v", err)
+	}
+
+	if len(sessionHistory) != 3 {
+		t.Errorf("Expected 3 entries for session, got %d", len(sessionHistory))
+	}
+
+	// Verify statuses
+	var successCount, failedCount int
+	for _, entry := range sessionHistory {
+		switch entry.Status {
+		case "SUCCESS":
+			successCount++
+		case "FAILED":
+			failedCount++
+		}
+	}
+
+	if successCount != 2 {
+		t.Errorf("Expected 2 SUCCESS entries, got %d", successCount)
+	}
+	if failedCount != 1 {
+		t.Errorf("Expected 1 FAILED entry, got %d", failedCount)
+	}
+
+	t.Logf("Query history: %d entries (%d success, %d failed)", len(sessionHistory), successCount, failedCount)
 }

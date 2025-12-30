@@ -1,3 +1,4 @@
+// Package warehouse provides virtual warehouse management for the Snowflake emulator.
 package warehouse
 
 import (
@@ -13,23 +14,24 @@ import (
 // State represents the state of a warehouse.
 type State string
 
+// Warehouse state constants.
 const (
-	StateSuspended State = "SUSPENDED"
-	StateResuming  State = "RESUMING"
-	StateActive    State = "ACTIVE"
+	StateSuspended  State = "SUSPENDED"
+	StateResuming   State = "RESUMING"
+	StateActive     State = "ACTIVE"
 	StateSuspending State = "SUSPENDING"
 )
 
 // Warehouse represents a Snowflake virtual warehouse (metadata only for Phase 1).
 type Warehouse struct {
-	ID        string
-	Name      string
-	State     State
-	Size      string // X-Small, Small, Medium, Large, X-Large, etc.
-	Comment   string
-	CreatedAt time.Time
-	Owner     string
-	AutoResume bool
+	ID          string
+	Name        string
+	State       State
+	Size        string // X-Small, Small, Medium, Large, X-Large, etc.
+	Comment     string
+	CreatedAt   time.Time
+	Owner       string
+	AutoResume  bool
 	AutoSuspend int // seconds
 }
 
@@ -48,7 +50,7 @@ func NewManager() *Manager {
 }
 
 // CreateWarehouse creates a new virtual warehouse.
-func (m *Manager) CreateWarehouse(ctx context.Context, name, size, comment string) (*Warehouse, error) {
+func (m *Manager) CreateWarehouse(_ context.Context, name, size, comment string) (*Warehouse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -90,7 +92,7 @@ func (m *Manager) CreateWarehouse(ctx context.Context, name, size, comment strin
 }
 
 // GetWarehouse retrieves a warehouse by name.
-func (m *Manager) GetWarehouse(ctx context.Context, name string) (*Warehouse, error) {
+func (m *Manager) GetWarehouse(_ context.Context, name string) (*Warehouse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -108,7 +110,7 @@ func (m *Manager) GetWarehouse(ctx context.Context, name string) (*Warehouse, er
 
 // ResumeWarehouse transitions a warehouse from SUSPENDED to ACTIVE state.
 // In Phase 1, this is metadata-only. In Phase 2, this will allocate compute resources.
-func (m *Manager) ResumeWarehouse(ctx context.Context, name string) error {
+func (m *Manager) ResumeWarehouse(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -135,7 +137,7 @@ func (m *Manager) ResumeWarehouse(ctx context.Context, name string) error {
 
 // SuspendWarehouse transitions a warehouse from ACTIVE to SUSPENDED state.
 // In Phase 1, this is metadata-only. In Phase 2, this will deallocate compute resources.
-func (m *Manager) SuspendWarehouse(ctx context.Context, name string) error {
+func (m *Manager) SuspendWarehouse(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -161,7 +163,7 @@ func (m *Manager) SuspendWarehouse(ctx context.Context, name string) error {
 }
 
 // DropWarehouse removes a warehouse.
-func (m *Manager) DropWarehouse(ctx context.Context, name string) error {
+func (m *Manager) DropWarehouse(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -177,7 +179,7 @@ func (m *Manager) DropWarehouse(ctx context.Context, name string) error {
 }
 
 // ListWarehouses returns all warehouses.
-func (m *Manager) ListWarehouses(ctx context.Context) ([]*Warehouse, error) {
+func (m *Manager) ListWarehouses(_ context.Context) ([]*Warehouse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

@@ -15,7 +15,7 @@ type Translator struct {
 // FunctionTranslator defines how to translate a specific function.
 type FunctionTranslator struct {
 	Handler func(fn *sqlparser.FuncExpr) sqlparser.Expr // Custom handler for complex transformations
-	Name    string                                       // DuckDB function name (for simple renames)
+	Name    string                                      // DuckDB function name (for simple renames)
 }
 
 // NewTranslator creates a new SQL translator with registered function mappings.
@@ -101,6 +101,16 @@ func (t *Translator) Translate(sql string) (string, error) {
 
 	// Trim whitespace
 	sql = strings.TrimSpace(sql)
+
+	// Skip AST transformation for DDL statements - they don't need function translation
+	// and the sqlparser adds unwanted backticks when serializing back to string
+	upperSQL := strings.ToUpper(sql)
+	if strings.HasPrefix(upperSQL, "CREATE ") ||
+		strings.HasPrefix(upperSQL, "DROP ") ||
+		strings.HasPrefix(upperSQL, "ALTER ") ||
+		strings.HasPrefix(upperSQL, "TRUNCATE ") {
+		return sql, nil
+	}
 
 	// Parse the SQL statement into an AST
 	stmt, err := sqlparser.Parse(sql)

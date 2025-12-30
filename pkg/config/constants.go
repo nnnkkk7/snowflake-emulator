@@ -26,10 +26,10 @@ const (
 
 // Session parameter defaults.
 const (
-	DefaultTimezone              = "UTC"
-	DefaultTimestampOutputFormat = "YYYY-MM-DD HH24:MI:SS"
+	DefaultTimezone               = "UTC"
+	DefaultTimestampOutputFormat  = "YYYY-MM-DD HH24:MI:SS"
 	DefaultClientSessionKeepAlive = "false"
-	DefaultQueryTag              = ""
+	DefaultQueryTag               = ""
 )
 
 // SessionParameter represents a session parameter name.

@@ -8,6 +8,7 @@ type LoginRequest struct {
 	Data LoginRequestData `json:"data"`
 }
 
+// LoginRequestData contains the login request details.
 type LoginRequestData struct {
 	ClientAppID       string         `json:"CLIENT_APP_ID"`
 	ClientAppVersion  string         `json:"CLIENT_APP_VERSION"`
@@ -23,6 +24,7 @@ type LoginRequestData struct {
 	ClientEnvironment map[string]any `json:"CLIENT_ENVIRONMENT,omitempty"`
 }
 
+// LoginResponse is the response to a login request.
 type LoginResponse struct {
 	Success bool              `json:"success"`
 	Message string            `json:"message,omitempty"`
@@ -30,6 +32,7 @@ type LoginResponse struct {
 	Data    *LoginSuccessData `json:"data,omitempty"`
 }
 
+// LoginSuccessData contains successful login response data.
 type LoginSuccessData struct {
 	Token                   string             `json:"token"`
 	MasterToken             string             `json:"masterToken"`
@@ -40,11 +43,13 @@ type LoginSuccessData struct {
 	SessionInfo             SessionInfo        `json:"sessionInfo"`
 }
 
+// ParameterBinding represents a session parameter name-value pair.
 type ParameterBinding struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
+// SessionInfo contains session context information.
 type SessionInfo struct {
 	DatabaseName  string `json:"databaseName"`
 	SchemaName    string `json:"schemaName"`
@@ -58,6 +63,7 @@ type TokenRequest struct {
 	RequestType string `json:"requestType"` // "RENEW" or "ISSUE"
 }
 
+// TokenResponse is the response to a token renewal request.
 type TokenResponse struct {
 	Success bool              `json:"success"`
 	Message string            `json:"message,omitempty"`
@@ -65,6 +71,7 @@ type TokenResponse struct {
 	Data    *TokenSuccessData `json:"data,omitempty"`
 }
 
+// TokenSuccessData contains successful token response data.
 type TokenSuccessData struct {
 	SessionToken      string `json:"sessionToken"`
 	ValidityInSeconds int64  `json:"validityInSeconds"`
@@ -75,6 +82,7 @@ type HeartbeatRequest struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
+// HeartbeatResponse is the response to a heartbeat request.
 type HeartbeatResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
@@ -83,12 +91,14 @@ type HeartbeatResponse struct {
 
 // Query API Types
 
+// QueryRequest is a SQL query execution request.
 type QueryRequest struct {
 	SQLText    string                 `json:"sqlText"`
 	Bindings   map[string]interface{} `json:"bindings,omitempty"`
 	Parameters map[string]string      `json:"parameters,omitempty"`
 }
 
+// QueryResponse is the response to a query request.
 type QueryResponse struct {
 	Success bool              `json:"success"`
 	Message string            `json:"message,omitempty"`
@@ -96,6 +106,7 @@ type QueryResponse struct {
 	Data    *QuerySuccessData `json:"data,omitempty"`
 }
 
+// QuerySuccessData contains successful query response data.
 type QuerySuccessData struct {
 	QueryID           string           `json:"queryId"`
 	SQLState          string           `json:"sqlState,omitempty"`
@@ -107,6 +118,7 @@ type QuerySuccessData struct {
 	QueryResultFormat string           `json:"queryResultFormat"`
 }
 
+// ColumnMetadata describes a result column's type information.
 type ColumnMetadata struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
@@ -121,6 +133,7 @@ type AbortRequest struct {
 	QueryID string `json:"queryId"`
 }
 
+// AbortResponse is the response to a query abort request.
 type AbortResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`

@@ -195,46 +195,46 @@ func snowflakeToDuckDBType(snowflakeType string) string {
 	// Map Snowflake types to DuckDB types
 	mapping := map[string]string{
 		// Numeric types
-		"NUMBER": "DECIMAL",
-		"INT":    "INTEGER",
-		"INTEGER":     "INTEGER",
-		"BIGINT":      "BIGINT",
-		"SMALLINT":    "SMALLINT",
-		"TINYINT":     "TINYINT",
-		"BYTEINT":     "TINYINT",
-		"FLOAT":       "DOUBLE",
-		"FLOAT4":      "FLOAT",
-		"FLOAT8":      "DOUBLE",
-		"DOUBLE":      "DOUBLE",
-		"REAL":        "FLOAT",
-		"DECIMAL":     "DECIMAL",
-		"NUMERIC":     "DECIMAL",
+		"NUMBER":   "DECIMAL",
+		"INT":      "INTEGER",
+		"INTEGER":  "INTEGER",
+		"BIGINT":   "BIGINT",
+		"SMALLINT": "SMALLINT",
+		"TINYINT":  "TINYINT",
+		"BYTEINT":  "TINYINT",
+		"FLOAT":    "DOUBLE",
+		"FLOAT4":   "FLOAT",
+		"FLOAT8":   "DOUBLE",
+		"DOUBLE":   "DOUBLE",
+		"REAL":     "FLOAT",
+		"DECIMAL":  "DECIMAL",
+		"NUMERIC":  "DECIMAL",
 
 		// String types
-		"VARCHAR":     "VARCHAR",
-		"CHAR":        "VARCHAR",
-		"CHARACTER":   "VARCHAR",
-		"STRING":      "VARCHAR",
-		"TEXT":        "VARCHAR",
-		"BINARY":      "BLOB",
-		"VARBINARY":   "BLOB",
+		"VARCHAR":   "VARCHAR",
+		"CHAR":      "VARCHAR",
+		"CHARACTER": "VARCHAR",
+		"STRING":    "VARCHAR",
+		"TEXT":      "VARCHAR",
+		"BINARY":    "BLOB",
+		"VARBINARY": "BLOB",
 
 		// Boolean
-		"BOOLEAN":     "BOOLEAN",
+		"BOOLEAN": "BOOLEAN",
 
 		// Date/Time types
-		"DATE":        "DATE",
-		"DATETIME":    "TIMESTAMP",
-		"TIME":        "TIME",
-		"TIMESTAMP":   "TIMESTAMP",
+		"DATE":          "DATE",
+		"DATETIME":      "TIMESTAMP",
+		"TIME":          "TIME",
+		"TIMESTAMP":     "TIMESTAMP",
 		"TIMESTAMP_LTZ": "TIMESTAMP WITH TIME ZONE",
 		"TIMESTAMP_NTZ": "TIMESTAMP",
 		"TIMESTAMP_TZ":  "TIMESTAMP WITH TIME ZONE",
 
 		// Semi-structured types (DuckDB doesn't have native JSON, use VARCHAR)
-		"VARIANT":     "VARCHAR",
-		"OBJECT":      "VARCHAR",
-		"ARRAY":       "VARCHAR",
+		"VARIANT": "VARCHAR",
+		"OBJECT":  "VARCHAR",
+		"ARRAY":   "VARCHAR",
 	}
 
 	if duckType, ok := mapping[sfType]; ok {

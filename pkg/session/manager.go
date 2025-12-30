@@ -1,3 +1,4 @@
+// Package session provides session management for the Snowflake emulator.
 package session
 
 import (
@@ -108,7 +109,7 @@ func (m *Manager) CreateSession(ctx context.Context, username, database, schema 
 
 // ValidateSession validates a session token and returns the session if valid.
 // It also updates the LastAccessedAt timestamp.
-func (m *Manager) ValidateSession(ctx context.Context, token string) (*Session, error) {
+func (m *Manager) ValidateSession(_ context.Context, token string) (*Session, error) {
 	if token == "" {
 		return nil, fmt.Errorf("token cannot be empty")
 	}
@@ -158,7 +159,7 @@ func (m *Manager) CloseSession(ctx context.Context, token string) error {
 }
 
 // UpdateSessionContext updates the database and/or schema for a session.
-func (m *Manager) UpdateSessionContext(ctx context.Context, token, database, schema string) error {
+func (m *Manager) UpdateSessionContext(_ context.Context, token, database, schema string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -183,7 +184,7 @@ func (m *Manager) UpdateSessionContext(ctx context.Context, token, database, sch
 }
 
 // CleanupExpiredSessions removes all expired sessions and returns the count.
-func (m *Manager) CleanupExpiredSessions(ctx context.Context) int {
+func (m *Manager) CleanupExpiredSessions(_ context.Context) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -201,7 +202,7 @@ func (m *Manager) CleanupExpiredSessions(ctx context.Context) int {
 }
 
 // RenewToken generates a new session token using master token
-func (m *Manager) RenewToken(ctx context.Context, masterToken string) (*Session, string, error) {
+func (m *Manager) RenewToken(_ context.Context, masterToken string) (*Session, string, error) {
 	if masterToken == "" {
 		return nil, "", fmt.Errorf("master token cannot be empty")
 	}
@@ -241,7 +242,7 @@ func (m *Manager) RenewToken(ctx context.Context, masterToken string) (*Session,
 }
 
 // UpdateLastAccessed updates the last accessed time for a session (heartbeat)
-func (m *Manager) UpdateLastAccessed(ctx context.Context, token string) error {
+func (m *Manager) UpdateLastAccessed(_ context.Context, token string) error {
 	if token == "" {
 		return fmt.Errorf("token cannot be empty")
 	}

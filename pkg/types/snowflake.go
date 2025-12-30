@@ -1,3 +1,4 @@
+// Package types provides Snowflake data type definitions and mappings to DuckDB.
 package types
 
 // SnowflakeType represents a Snowflake data type.
@@ -18,11 +19,11 @@ const (
 	TypeBoolean SnowflakeType = "BOOLEAN"
 
 	// Temporal types
-	TypeDate          SnowflakeType = "DATE"
-	TypeTime          SnowflakeType = "TIME"
-	TypeTimestamp     SnowflakeType = "TIMESTAMP"
-	TypeTimestampLTZ  SnowflakeType = "TIMESTAMP_LTZ"
-	TypeTimestampTZ   SnowflakeType = "TIMESTAMP_TZ"
+	TypeDate         SnowflakeType = "DATE"
+	TypeTime         SnowflakeType = "TIME"
+	TypeTimestamp    SnowflakeType = "TIMESTAMP"
+	TypeTimestampLTZ SnowflakeType = "TIMESTAMP_LTZ"
+	TypeTimestampTZ  SnowflakeType = "TIMESTAMP_TZ"
 
 	// Semi-structured types (Phase 2)
 	TypeVariant SnowflakeType = "VARIANT"
