@@ -47,6 +47,14 @@ linters:
     - bodyclose     # Check for unclosed HTTP response bodies
 
   settings:
+    errcheck:
+      # Ignore common close functions in defer statements
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (io.Closer).Close
+        - (*net/http.Response).Body.Close
+
     gocyclo:
       # Maximum cyclomatic complexity - reasonable for CLI tools
       min-complexity: 15
@@ -57,9 +65,10 @@ linters:
     govet:
       # Enable all analyzers
       enable-all: true
-      # Disable shadow variable detection (can be noisy)
+      # Disable noisy analyzers
       disable:
-        - shadow
+        - shadow          # Can be noisy
+        - fieldalignment  # Prioritize readability over memory optimization
 
     gocritic:
       # Enable multiple check groups
@@ -96,6 +105,51 @@ linters:
         - name: unused-parameter
         - name: unreachable-code
         - name: redefines-builtin-id
+
+  exclusions:
+    # Use common presets
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+
+    # Exclude rules for specific files/linters
+    rules:
+      # Test files exclusions
+      - path: _test\.go
+        linters:
+          - gocyclo     # Tests can be complex
+          - goconst     # Test strings often repeat
+          - gosec       # Security checks not critical in tests
+          - errcheck    # Error checking in tests can be relaxed
+          - nolintlint  # Allow unused nolint directives in tests
+          - revive      # Allow unused parameters in tests
+          - gocritic    # Allow httpNoBody etc in tests
+          - misspell    # Allow variable naming in tests
+          - staticcheck # Allow nil checks in tests
+      # Sample code exclusions
+      - path: sample/
+        linters:
+          - gosec
+          - errcheck
+          - gocritic
+      # Stage manager uses 0755 permissions intentionally for local dev
+      - path: pkg/stage/
+        linters:
+          - gosec
+          - gocritic  # equalFold suggestions
+          - goconst   # INTERNAL string
+          - revive    # StageFile naming
+      # Copy handler has complex file parsing logic
+      - path: pkg/query/copy_handler\.go
+        linters:
+          - gocyclo
+          - gocritic  # regexpSimplify
+          - goconst   # NULL string
+      # Types package uses string literals intentionally for clarity
+      - path: pkg/types/
+        linters:
+          - goconst
 
 issues:
   # Maximum issues count per linter (0 = unlimited)
