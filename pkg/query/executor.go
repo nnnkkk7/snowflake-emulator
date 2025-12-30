@@ -15,9 +15,12 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
-// BindingValue represents a parameter binding value for SQL queries.
+// QueryBindingValue represents a parameter binding value for SQL queries.
 // This mirrors the REST API v2 binding format.
-type BindingValue struct {
+// Named QueryBindingValue to avoid conflict with types.BindingValue in server/types.
+//
+//nolint:revive // stuttering is intentional to avoid ambiguity with types.BindingValue
+type QueryBindingValue struct {
 	Type  string // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
 	Value string // String representation of the value
 }
@@ -116,7 +119,7 @@ func (e *Executor) Query(ctx context.Context, sql string) (*Result, error) {
 
 // QueryWithBindings executes a SELECT query with parameter bindings and returns results.
 // Bindings are keyed by position (e.g., "1", "2", "3") and replace :1, :2, :3 placeholders.
-func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings map[string]*BindingValue) (*Result, error) {
+func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings map[string]*QueryBindingValue) (*Result, error) {
 	if len(bindings) == 0 {
 		return e.Query(ctx, sql)
 	}
@@ -132,7 +135,7 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 
 // applyBindings replaces :N placeholders with actual values from bindings.
 // Snowflake uses :1, :2, etc. for positional parameters.
-func (e *Executor) applyBindings(sql string, bindings map[string]*BindingValue) (string, error) {
+func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
 	// Get binding keys sorted in descending order to avoid :1 replacing :10, :11, etc.
 	keys := make([]int, 0, len(bindings))
 	for k := range bindings {
@@ -168,7 +171,7 @@ func (e *Executor) applyBindings(sql string, bindings map[string]*BindingValue) 
 }
 
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
-func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*BindingValue) string {
+func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*QueryBindingValue) string {
 	// Find all ? placeholders
 	re := regexp.MustCompile(`\?`)
 	matches := re.FindAllStringIndex(sql, -1)
@@ -199,7 +202,7 @@ func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[stri
 }
 
 // formatBindingValue formats a binding value for SQL substitution.
-func formatBindingValue(b *BindingValue) (string, error) {
+func formatBindingValue(b *QueryBindingValue) (string, error) {
 	if b == nil {
 		return ValueNull, nil
 	}

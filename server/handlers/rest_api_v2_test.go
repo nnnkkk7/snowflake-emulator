@@ -19,8 +19,8 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
-// setupRESTAPIV2Handler creates a test handler with dependencies.
-func setupRESTAPIV2Handler(t *testing.T) (*RESTAPIV2Handler, *chi.Mux) {
+// setupRestAPIv2Handler creates a test handler with dependencies.
+func setupRestAPIv2Handler(t *testing.T) (*RestAPIv2Handler, *chi.Mux) {
 	t.Helper()
 
 	db, err := sql.Open("duckdb", "")
@@ -43,7 +43,7 @@ func setupRESTAPIV2Handler(t *testing.T) (*RESTAPIV2Handler, *chi.Mux) {
 	executor := query.NewExecutor(connMgr, repo)
 	stmtMgr := query.NewStatementManager(1 * time.Hour)
 
-	handler := NewRESTAPIV2Handler(executor, stmtMgr, repo)
+	handler := NewRestAPIv2Handler(executor, stmtMgr, repo)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -56,8 +56,8 @@ func setupRESTAPIV2Handler(t *testing.T) (*RESTAPIV2Handler, *chi.Mux) {
 	return handler, r
 }
 
-func TestRESTAPIV2Handler_SubmitStatement_Sync(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_SubmitStatement_Sync(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	reqBody := types.SubmitStatementRequest{
 		Statement: "SELECT 1 AS num",
@@ -103,8 +103,8 @@ func TestRESTAPIV2Handler_SubmitStatement_Sync(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_SubmitStatement_WithBindings(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_SubmitStatement_WithBindings(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	reqBody := types.SubmitStatementRequest{
 		Statement: "SELECT :1 AS num, :2 AS name",
@@ -148,8 +148,8 @@ func TestRESTAPIV2Handler_SubmitStatement_WithBindings(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_SubmitStatement_EmptyStatement(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_SubmitStatement_EmptyStatement(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	reqBody := types.SubmitStatementRequest{
 		Statement: "",
@@ -174,8 +174,8 @@ func TestRESTAPIV2Handler_SubmitStatement_EmptyStatement(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_SubmitStatement_InvalidSQL(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_SubmitStatement_InvalidSQL(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	reqBody := types.SubmitStatementRequest{
 		Statement: "INVALID SQL STATEMENT",
@@ -200,8 +200,8 @@ func TestRESTAPIV2Handler_SubmitStatement_InvalidSQL(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_GetStatement(t *testing.T) {
-	handler, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_GetStatement(t *testing.T) {
+	handler, router := setupRestAPIv2Handler(t)
 
 	// First, submit a statement
 	reqBody := types.SubmitStatementRequest{
@@ -242,8 +242,8 @@ func TestRESTAPIV2Handler_GetStatement(t *testing.T) {
 	_ = handler // Use handler to avoid unused warning
 }
 
-func TestRESTAPIV2Handler_GetStatement_NotFound(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_GetStatement_NotFound(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/statements/non-existing-handle", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
@@ -256,8 +256,8 @@ func TestRESTAPIV2Handler_GetStatement_NotFound(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_CancelStatement(t *testing.T) {
-	handler, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_CancelStatement(t *testing.T) {
+	handler, router := setupRestAPIv2Handler(t)
 
 	// Create a statement directly in the manager (simulating a long-running query)
 	stmt := handler.stmtMgr.CreateStatement("SELECT pg_sleep(100)", "TEST_DB", "PUBLIC", "")
@@ -294,8 +294,8 @@ func TestRESTAPIV2Handler_CancelStatement(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_CancelStatement_NotFound(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_CancelStatement_NotFound(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/statements/non-existing-handle/cancel", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
@@ -308,8 +308,8 @@ func TestRESTAPIV2Handler_CancelStatement_NotFound(t *testing.T) {
 	}
 }
 
-func TestRESTAPIV2Handler_InvalidJSON(t *testing.T) {
-	_, router := setupRESTAPIV2Handler(t)
+func TestRestAPIv2Handler_InvalidJSON(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/statements", strings.NewReader("invalid json"))
 	req.Header.Set("Content-Type", "application/json")

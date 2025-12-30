@@ -44,7 +44,7 @@ func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 	executor := query.NewExecutor(connMgr, repo)
 	stmtMgr := query.NewStatementManager(1 * time.Hour)
 
-	restHandler := handlers.NewRESTAPIV2Handler(executor, stmtMgr, repo)
+	restHandler := handlers.NewRestAPIv2Handler(executor, stmtMgr, repo)
 
 	r := chi.NewRouter()
 	r.Route("/api/v2", func(r chi.Router) {
