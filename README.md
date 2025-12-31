@@ -23,6 +23,7 @@ Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckD
 - **REST API v2** - SQL statements API for language-agnostic access
 - **SQL Translation** - Automatic Snowflake SQL to DuckDB conversion
 - **COPY INTO Support** - Load data from internal stages (CSV, JSON)
+- **MERGE INTO Support** - Upsert operations with native DuckDB MERGE or decomposed statements
 - **Metadata Management** - Database, Schema, Table, Stage, Warehouse tracking
 - **Session Management** - Token-based authentication (development mode)
 
@@ -188,11 +189,11 @@ curl http://localhost:8080/api/v2/warehouses
 | `/api/v2/statements/{handle}` | GET | Get statement status/result |
 | `/api/v2/statements/{handle}/cancel` | POST | Cancel statement |
 | `/api/v2/databases` | GET, POST | List/Create databases |
-| `/api/v2/databases/{db}` | GET, DELETE | Get/Drop database |
+| `/api/v2/databases/{db}` | GET, PUT, DELETE | Get/Alter/Drop database |
 | `/api/v2/databases/{db}/schemas` | GET, POST | List/Create schemas |
 | `/api/v2/databases/{db}/schemas/{schema}` | GET, DELETE | Get/Drop schema |
-| `/api/v2/databases/{db}/schemas/{schema}/tables` | GET | List tables |
-| `/api/v2/databases/{db}/schemas/{schema}/tables/{table}` | GET, DELETE | Get/Drop table |
+| `/api/v2/databases/{db}/schemas/{schema}/tables` | GET, POST | List/Create tables |
+| `/api/v2/databases/{db}/schemas/{schema}/tables/{table}` | GET, PUT, DELETE | Get/Alter/Drop table |
 | `/api/v2/warehouses` | GET, POST | List/Create warehouses |
 | `/api/v2/warehouses/{wh}` | GET, DELETE | Get/Drop warehouse |
 | `/api/v2/warehouses/{wh}:resume` | POST | Resume warehouse |
@@ -201,7 +202,7 @@ curl http://localhost:8080/api/v2/warehouses
 
 ## Architecture
 
-```
+```text
 snowflake-emulator/
 ├── cmd/server/              # Application entry point
 ├── pkg/
@@ -210,10 +211,13 @@ snowflake-emulator/
 │   ├── contentdata/         # Table content data operations
 │   ├── metadata/            # Database/Schema/Table/Stage metadata
 │   ├── query/
-│   │   ├── executor.go      # Query execution engine
+│   │   ├── executor.go      # Query execution engine with functional options
 │   │   ├── translator.go    # Snowflake → DuckDB SQL translation (AST-based)
 │   │   ├── classifier.go    # SQL statement classification
-│   │   ├── copy_handler.go  # COPY INTO implementation
+│   │   ├── result.go        # Result types (Result, ExecResult, CopyResult, MergeResult)
+│   │   ├── table_naming.go  # DuckDB table name generation (DATABASE.SCHEMA_TABLE)
+│   │   ├── copy_processor.go    # COPY INTO implementation
+│   │   ├── merge_processor.go   # MERGE INTO implementation
 │   │   ├── statement_manager.go # Statement lifecycle management
 │   │   └── type_mapper.go   # DuckDB → Snowflake type mapping
 │   ├── session/             # Session & token management
@@ -237,8 +241,6 @@ snowflake-emulator/
 | Service | `pkg/query/`, `pkg/session/` | Business logic, SQL execution |
 | Repository | `pkg/metadata/`, `pkg/contentdata/` | Data access abstraction |
 | Storage | `pkg/connection/` | DuckDB connection management |
-
-
 
 ## Limitations
 
