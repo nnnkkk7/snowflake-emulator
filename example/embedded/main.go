@@ -29,7 +29,8 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Snowflake Emulator Embedded Example ===\n")
+	fmt.Println("=== Snowflake Emulator Embedded Example ===")
+	fmt.Println()
 
 	// Create an in-memory DuckDB instance
 	db, err := sql.Open("duckdb", "")

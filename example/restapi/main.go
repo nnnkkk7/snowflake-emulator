@@ -34,10 +34,10 @@ func getBaseURL() string {
 
 // StatementRequest represents a SQL statement submission request
 type StatementRequest struct {
-	Statement string            `json:"statement"`
-	Database  string            `json:"database,omitempty"`
-	Schema    string            `json:"schema,omitempty"`
-	Warehouse string            `json:"warehouse,omitempty"`
+	Statement string             `json:"statement"`
+	Database  string             `json:"database,omitempty"`
+	Schema    string             `json:"schema,omitempty"`
+	Warehouse string             `json:"warehouse,omitempty"`
 	Bindings  map[string]Binding `json:"bindings,omitempty"`
 }
 
@@ -60,8 +60,8 @@ type StatementResponse struct {
 
 // ResultSetMetaData contains metadata about the result set
 type ResultSetMetaData struct {
-	NumRows int           `json:"numRows"`
-	Format  string        `json:"format"`
+	NumRows int            `json:"numRows"`
+	Format  string         `json:"format"`
 	RowType []RowTypeField `json:"rowType"`
 }
 
@@ -87,7 +87,7 @@ type WarehouseRequest struct {
 }
 
 func main() {
-	fmt.Println("=== Snowflake Emulator REST API v2 Example ===\n")
+	fmt.Println("=== Snowflake Emulator REST API v2 Example ===")
 
 	// Example 1: Create a database
 	fmt.Println("1. Creating database 'DEMO_DB'...")
@@ -300,7 +300,10 @@ func listDatabases() {
 
 	body, _ := io.ReadAll(resp.Body)
 	var result map[string]any
-	json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("Failed to parse response: %v", err)
+		return
+	}
 
 	if databases, ok := result["databases"].([]any); ok {
 		for _, db := range databases {
@@ -321,7 +324,10 @@ func listWarehouses() {
 
 	body, _ := io.ReadAll(resp.Body)
 	var result map[string]any
-	json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("Failed to parse response: %v", err)
+		return
+	}
 
 	if warehouses, ok := result["warehouses"].([]any); ok {
 		for _, wh := range warehouses {
