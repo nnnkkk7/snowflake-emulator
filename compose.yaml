@@ -1,0 +1,19 @@
+services:
+  snowflake-emulator:
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - DB_PATH=${DB_PATH:-:memory:}
+      - STAGE_DIR=/data/stages
+    volumes:
+      - emulator-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  emulator-data:
