@@ -1,51 +1,84 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
+
 
 permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Lint & Test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Run golangci-lint
+          cache: true
+      - name: golangci-lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.1
           args: --timeout=5m
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Run tests
         run: make test-all
+
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: CGO_ENABLED=1 go build -o snowflake-emulator ./cmd/server
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: snowflake-emulator
+          path: snowflake-emulator
+          retention-days: 7
 
   docker:
     name: Docker Build & Test
     runs-on: ubuntu-latest
+    needs: [lint, test]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Build Docker image
-        run: docker compose build
-
+          cache: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Build Docker image with cache
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/nnnkkk7/snowflake-emulator:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Start emulator container
-        run: docker compose up -d
-
+        run: docker run -d --name snowflake-emulator -p 8080:8080 ghcr.io/nnnkkk7/snowflake-emulator:test
       - name: Wait for emulator to be ready
         run: |
           for i in {1..30}; do
@@ -57,12 +90,10 @@ jobs:
             sleep 1
           done
           echo "Emulator failed to start"
-          docker compose logs
+          docker logs snowflake-emulator
           exit 1
-
       - name: Run Docker example
         run: go run ./example/docker
-
       - name: Stop emulator container
         if: always()
-        run: docker compose down
+        run: docker stop snowflake-emulator && docker rm snowflake-emulator

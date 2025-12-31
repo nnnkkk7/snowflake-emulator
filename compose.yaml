@@ -1,19 +1,33 @@
+# compose.yaml
+# Snowflake Emulator - Docker Compose configuration
+#
+# Usage:
+#   Development:  docker compose up --build
+#   CI (memory):  DB_PATH=:memory: docker compose up
+
 services:
   snowflake-emulator:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/nnnkkk7/snowflake-emulator:latest
+    container_name: snowflake-emulator
     ports:
       - "${PORT:-8080}:8080"
     environment:
-      - DB_PATH=${DB_PATH:-:memory:}
+      - PORT=8080
+      - DB_PATH=${DB_PATH:-/data/snowflake.db}
       - STAGE_DIR=/data/stages
     volumes:
       - emulator-data:/data
+      - ./testdata:/testdata:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: 10s
+      start_period: 5s
       retries: 3
-      start_period: 10s
+    restart: unless-stopped
 
 volumes:
   emulator-data:

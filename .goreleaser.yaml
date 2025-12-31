@@ -1,66 +1,54 @@
-# GoReleaser v2 configuration
+# GoReleaser v2 configuration for Snowflake Emulator
 version: 2
 
 # Commands to run before build
 before:
   hooks:
-    # Tidy dependencies
     - go mod tidy
-    # Download dependencies (for cache efficiency)
     - go mod download
 
 # Build configuration
+# Note: DuckDB requires CGO, so we use native builds only (no cross-compilation)
 builds:
-  - id: gopin
-    # Main package path
-    main: ./cmd/gopin
+  - id: snowflake-emulator
+    main: ./cmd/server
+    binary: snowflake-emulator
 
-    # Generated binary name
-    binary: gopin
-
-    # Environment variables
+    # CGO is required for DuckDB
     env:
-      # Disable CGO for easier cross-compilation
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
 
-    # Target operating systems
+    # Only build for the runner's native platform
+    # Cross-compilation with CGO is complex and error-prone
     goos:
       - linux
-      - darwin   # macOS
-      - windows
+      - darwin
 
-    # Target architectures
     goarch:
       - amd64
       - arm64
 
-    # Unsupported combinations
+    # Skip cross-compilation combinations that require CGO cross-compilers
     ignore:
-      # Windows ARM64 support is still incomplete
-      - goos: windows
+      # Cross-compilation requires special setup, so we skip non-native builds
+      # GitHub Actions runners will build native binaries for each platform
+      - goos: linux
         goarch: arm64
+      - goos: darwin
+        goarch: amd64
 
-    # Linker flags (version information injection)
     ldflags:
-      # -s: strip symbol table (reduce binary size)
-      # -w: strip DWARF debug info (reduce binary size)
       - -s -w
-      # Inject version information to pkg/cli.Version
-      # Note: github.com/nnnkkk7/gopin must match module name in go.mod
-      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Version={{.Version}}
-      # Additional information (optional)
-      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Commit={{.Commit}}
-      - -X github.com/nnnkkk7/snowflake-emulator/pkg/cli.Date={{.Date}}
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
 
-# Archive settings (create tar.gz/zip for releases)
+# Archive settings
 archives:
-  - id: gopin-archive
-    # Archive formats (tar.gz for unix, zip for windows)
+  - id: snowflake-emulator-archive
     formats:
       - tar.gz
 
-    # Archive filename template
-    # Example: gopin_0.1.0_Darwin_x86_64.tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -70,13 +58,6 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
 
-    # OS-specific format overrides
-    format_overrides:
-      # Use zip for Windows
-      - goos: windows
-        formats: [zip]
-
-    # Files to include in archive
     files:
       - README.md
       - LICENSE
@@ -87,31 +68,13 @@ checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
 
-# Snapshot build naming convention
+# Snapshot build naming
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# CHANGELOG generation settings
+# CHANGELOG generation
 changelog:
-  # Use GitHub native auto-generation
   use: github-native
-
-  # Custom CHANGELOG example (commented out)
-  # sort: asc
-  # filters:
-  #   exclude:
-  #     - '^docs:'
-  #     - '^test:'
-  #     - '^chore:'
-  # groups:
-  #   - title: 'New Features'
-  #     regexp: '^.*?feat(\(.+\))?!?:.+$'
-  #     order: 0
-  #   - title: 'Bug Fixes'
-  #     regexp: '^.*?fix(\(.+\))?!?:.+$'
-  #     order: 1
-  #   - title: 'Other Changes'
-  #     order: 999
 
 # GitHub Release settings
 release:
@@ -119,22 +82,26 @@ release:
     owner: nnnkkk7
     name: snowflake-emulator
 
-  # Do not create as draft
   draft: false
-
-  # Auto-detect prerelease (e.g., v1.0.0-beta.1 is automatically prerelease)
   prerelease: auto
-
-  # Replace existing release if it exists
   mode: replace
 
-  # Release notes header
   header: |
-    ## snowflake-emulator {{ .Version }}
+    ## Snowflake Emulator {{ .Version }}
 
-    A local emulator for Snowflake.
+    A lightweight, open-source Snowflake emulator built with Go and DuckDB.
 
-  # Release notes footer
+    ### Installation
+
+    **Docker (Recommended)**:
+    ```bash
+    docker pull ghcr.io/nnnkkk7/snowflake-emulator:{{ .Version }}
+    docker run -p 8080:8080 ghcr.io/nnnkkk7/snowflake-emulator:{{ .Version }}
+    ```
+
+    **Binary**:
+    Download the appropriate binary for your platform below.
+
   footer: |
     ---
 

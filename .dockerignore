@@ -2,13 +2,15 @@
 .git
 .gitignore
 
-# Documentation
-*.md
+# Documentation (except README for reference)
 docs/
+*.md
+!README.md
 
 # Test files
 *_test.go
 coverage.out
+testdata/
 
 # IDE
 .vscode/
@@ -25,3 +27,15 @@ coverage.out
 *.so
 *.dylib
 snowflake-emulator
+
+# Database files
+*.db
+*.duckdb
+
+# Environment
+.env*
+.envrc
+
+# OS
+.DS_Store
+Thumbs.db
