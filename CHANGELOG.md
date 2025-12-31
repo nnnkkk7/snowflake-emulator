@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.0.2](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.1...v0.0.2) - 2025-12-31
+- feat: add Renovate configuration for dependency management by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/4
+- ci: remove unnecessary by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/6
+- docs: update readme by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/7
+- refactor: rename BindingValue to QueryBindingValue and update related handlers for consistency by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/8
+- chore: add example code by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/9
+- ci: add workflow for docker by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/10
+- feat: add ALTER DATABASE and ALTER TABLE endpoints by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/11
+- feat: implement MERGE INTO support with handler and SQL parsing by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/12
+- refactor: replace COPY and MERGE handlers with processors by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/13
+- docs: update readme by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/14
+- chore: update GoReleaser and Docker configurations for docker artifact by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/15
+
 ## [v0.0.1](https://github.com/nnnkkk7/snowflake-emulator/commits/v0.0.1) - 2025-12-30
 - feat: add GoReleaser and tagpr workflows for automated releases by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/2
 - feat: Initial implementation of Snowflake Emulator by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/1
