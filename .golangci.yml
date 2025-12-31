@@ -127,12 +127,10 @@ linters:
           - gocritic    # Allow httpNoBody etc in tests
           - misspell    # Allow variable naming in tests
           - staticcheck # Allow nil checks in tests
-      # Sample code exclusions
-      - path: sample/
+      # Example code exclusions - examples prioritize clarity over strict lint rules
+      - path: example/
         linters:
-          - gosec
-          - errcheck
-          - gocritic
+          - gocritic  # exitAfterDefer warnings in examples are acceptable
       # Stage manager uses 0755 permissions intentionally for local dev
       - path: pkg/stage/
         linters:
