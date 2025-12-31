@@ -18,6 +18,7 @@ const (
 	StatementTypeDDLDrop                          // DROP TABLE, DROP DATABASE, etc.
 	StatementTypeDDLAlter                         // ALTER TABLE, etc.
 	StatementTypeCopy                             // COPY INTO
+	StatementTypeMerge                            // MERGE INTO
 	StatementTypeTransaction                      // BEGIN, COMMIT, ROLLBACK
 	StatementTypeOther                            // Unknown or unsupported
 )
@@ -90,6 +91,17 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 		return ClassifyResult{
 			Type:            StatementTypeCopy,
 			StatementTypeID: config.StatementTypeDML, // COPY is treated as DML
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           true,
+		}
+	}
+
+	// Check for MERGE statement
+	if strings.HasPrefix(upperSQL, "MERGE") {
+		return ClassifyResult{
+			Type:            StatementTypeMerge,
+			StatementTypeID: config.StatementTypeDML, // MERGE is treated as DML
 			IsQuery:         false,
 			IsDDL:           false,
 			IsDML:           true,
@@ -178,6 +190,17 @@ func GetStatementTypeID(sql string) config.StatementTypeID {
 // IsCopy is a convenience function to check if SQL is a COPY statement.
 func IsCopy(sql string) bool {
 	return DefaultClassifier.IsCopy(sql)
+}
+
+// IsMerge checks if the SQL is a MERGE INTO statement.
+func (c *Classifier) IsMerge(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "MERGE")
+}
+
+// IsMerge is a convenience function to check if SQL is a MERGE statement.
+func IsMerge(sql string) bool {
+	return DefaultClassifier.IsMerge(sql)
 }
 
 // IsTransaction checks if the SQL is a transaction control statement.

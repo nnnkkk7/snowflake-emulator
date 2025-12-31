@@ -45,6 +45,23 @@ func setupTestServer(t *testing.T) (*httptest.Server, *session.Manager, *metadat
 	sessionMgr := session.NewManager(1 * time.Hour)
 	executor := query.NewExecutor(mgr, repo)
 
+	// Initialize stage manager for COPY INTO support
+	stageDir, err := os.MkdirTemp("", "test_stages_*")
+	if err != nil {
+		t.Fatalf("failed to create temp stage dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(stageDir)
+	})
+	stageMgr := stage.NewManager(repo, stageDir)
+
+	// Wire handlers to executor
+	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
+	executor.SetCopyHandler(copyHandler)
+
+	mergeHandler := query.NewMergeHandler(executor)
+	executor.SetMergeHandler(mergeHandler)
+
 	// Create test database and schema
 	ctx := context.Background()
 	database, err := repo.CreateDatabase(ctx, "TEST_DB", "Test database")
@@ -891,4 +908,103 @@ func TestIntegration_QueryHistory(t *testing.T) {
 	}
 
 	t.Logf("Query history: %d entries (%d success, %d failed)", len(sessionHistory), successCount, failedCount)
+}
+
+// TestIntegration_MergeStatement tests MERGE INTO statement execution.
+func TestIntegration_MergeStatement(t *testing.T) {
+	server, _, _ := setupTestServer(t)
+
+	// Login with gosnowflake protocol
+	loginReq := map[string]interface{}{
+		"data": map[string]string{
+			"LOGIN_NAME":   "testuser",
+			"PASSWORD":     "testpass",
+			"databaseName": "TEST_DB",
+			"schemaName":   "PUBLIC",
+		},
+	}
+
+	body, _ := json.Marshal(loginReq)
+	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
+	defer func() { _ = resp.Body.Close() }()
+
+	var loginResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+	data := loginResp["data"].(map[string]interface{})
+	token := data["token"].(string)
+
+	executeSQL := func(sqlText string) (*http.Response, map[string]interface{}) {
+		req := map[string]string{"sqlText": sqlText}
+		body, _ := json.Marshal(req)
+		httpReq, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		return resp, result
+	}
+
+	// Create source table
+	resp, _ = executeSQL("CREATE TABLE TEST_DB.PUBLIC_SOURCE (ID INTEGER, NAME VARCHAR, SCORE INTEGER)")
+	defer func() { _ = resp.Body.Close() }()
+
+	// Insert initial data into target (STUDENTS table)
+	resp, _ = executeSQL("INSERT INTO TEST_DB.PUBLIC_STUDENTS VALUES (1, 'Alice', 90), (2, 'Bob', 80)")
+	defer func() { _ = resp.Body.Close() }()
+
+	// Insert data into source
+	resp, _ = executeSQL("INSERT INTO TEST_DB.PUBLIC_SOURCE VALUES (1, 'Alice Updated', 95), (2, 'Bob', 85), (3, 'Charlie', 88)")
+	defer func() { _ = resp.Body.Close() }()
+
+	// Execute MERGE - Update existing rows and insert new ones
+	mergeSQL := `MERGE INTO TEST_DB.PUBLIC_STUDENTS t
+		USING TEST_DB.PUBLIC_SOURCE s
+		ON t.ID = s.ID
+		WHEN MATCHED THEN UPDATE SET NAME = s.NAME, SCORE = s.SCORE
+		WHEN NOT MATCHED THEN INSERT (ID, NAME, SCORE) VALUES (s.ID, s.NAME, s.SCORE)`
+
+	resp, result := executeSQL(mergeSQL)
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("MERGE failed with status %d", resp.StatusCode)
+	}
+
+	if success, ok := result["success"].(bool); !ok || !success {
+		t.Fatalf("MERGE failed: %v", result)
+	}
+
+	// Verify results
+	resp, result = executeSQL("SELECT * FROM TEST_DB.PUBLIC_STUDENTS ORDER BY ID")
+	defer func() { _ = resp.Body.Close() }()
+
+	queryData := result["data"].(map[string]interface{})
+	rowset := queryData["rowset"].([]interface{})
+
+	if len(rowset) != 3 {
+		t.Errorf("Expected 3 rows after MERGE, got %d", len(rowset))
+	}
+
+	// Verify Alice was updated
+	row1 := rowset[0].([]interface{})
+	if row1[1] != "Alice Updated" {
+		t.Errorf("Expected 'Alice Updated', got %v", row1[1])
+	}
+	if row1[2] != "95" {
+		t.Errorf("Expected score 95 for Alice, got %v", row1[2])
+	}
+
+	// Verify Charlie was inserted
+	row3 := rowset[2].([]interface{})
+	if row3[1] != "Charlie" {
+		t.Errorf("Expected 'Charlie', got %v", row3[1])
+	}
+
+	t.Log("MERGE statement executed successfully")
 }

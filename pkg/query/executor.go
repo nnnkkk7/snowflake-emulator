@@ -37,10 +37,11 @@ type QueryBindingValue struct {
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
 type Executor struct {
-	mgr         *connection.Manager
-	repo        *metadata.Repository
-	translator  *Translator
-	copyHandler *CopyHandler
+	mgr          *connection.Manager
+	repo         *metadata.Repository
+	translator   *Translator
+	copyHandler  *CopyHandler
+	mergeHandler *MergeHandler
 }
 
 // Result represents the result of a query execution.
@@ -67,6 +68,11 @@ func NewExecutor(mgr *connection.Manager, repo *metadata.Repository) *Executor {
 // SetCopyHandler sets the COPY handler for executing COPY INTO statements.
 func (e *Executor) SetCopyHandler(handler *CopyHandler) {
 	e.copyHandler = handler
+}
+
+// SetMergeHandler sets the MERGE handler for executing MERGE INTO statements.
+func (e *Executor) SetMergeHandler(handler *MergeHandler) {
+	e.mergeHandler = handler
 }
 
 // Query executes a SELECT query and returns results.
@@ -318,6 +324,11 @@ func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error)
 		return e.executeCopy(ctx, sql)
 	}
 
+	// Handle MERGE INTO statements
+	if IsMerge(sql) {
+		return e.executeMerge(ctx, sql)
+	}
+
 	// Translate Snowflake SQL to DuckDB SQL
 	translatedSQL, err := e.translator.Translate(sql)
 	if err != nil {
@@ -446,6 +457,29 @@ func (e *Executor) executeCopy(ctx context.Context, sql string) (*ExecResult, er
 
 	return &ExecResult{
 		RowsAffected: result.RowsLoaded,
+	}, nil
+}
+
+// executeMerge handles MERGE INTO statements.
+func (e *Executor) executeMerge(ctx context.Context, sql string) (*ExecResult, error) {
+	if e.mergeHandler == nil {
+		return nil, fmt.Errorf("MERGE handler not configured")
+	}
+
+	// Parse the MERGE statement
+	stmt, err := e.mergeHandler.ParseMergeStatement(sql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse MERGE statement: %w", err)
+	}
+
+	// Execute MERGE
+	result, err := e.mergeHandler.ExecuteMerge(ctx, stmt)
+	if err != nil {
+		return nil, fmt.Errorf("MERGE failed: %w", err)
+	}
+
+	return &ExecResult{
+		RowsAffected: result.RowsInserted + result.RowsUpdated + result.RowsDeleted,
 	}, nil
 }
 

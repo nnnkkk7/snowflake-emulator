@@ -64,6 +64,10 @@ func main() {
 	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
 	executor.SetCopyHandler(copyHandler)
 
+	// Initialize MERGE handler and wire to executor
+	mergeHandler := query.NewMergeHandler(executor)
+	executor.SetMergeHandler(mergeHandler)
+
 	sessionHandler := handlers.NewSessionHandler(sessionMgr, repo)
 	queryHandler := handlers.NewQueryHandler(executor, sessionMgr)
 	restAPIHandler := handlers.NewRestAPIv2Handler(executor, stmtMgr, repo)

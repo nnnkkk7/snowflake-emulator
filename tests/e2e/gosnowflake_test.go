@@ -60,6 +60,10 @@ func setupTestEmulator(t *testing.T) *httptest.Server {
 	sessionMgr := session.NewManager(1 * time.Hour)
 	executor := query.NewExecutor(connMgr, repo)
 
+	// Initialize MERGE handler for MERGE INTO support
+	mergeHandler := query.NewMergeHandler(executor)
+	executor.SetMergeHandler(mergeHandler)
+
 	sessionHandler := handlers.NewSessionHandler(sessionMgr, repo)
 	queryHandler := handlers.NewQueryHandler(executor, sessionMgr)
 
@@ -416,4 +420,110 @@ func TestHTTPAPI_SessionClose(t *testing.T) {
 	}
 
 	t.Log("POST /session?delete=true: OK")
+}
+
+// TestGosnowflake_MergeStatement tests MERGE INTO statement via gosnowflake driver.
+// This test verifies that MERGE operations work correctly through the emulator.
+func TestGosnowflake_MergeStatement(t *testing.T) {
+	server := setupTestEmulator(t)
+	hostPort := server.URL[7:] // Remove "http://"
+
+	dsn := fmt.Sprintf("testuser:testpass@%s/TEST_DB/PUBLIC?account=testaccount&protocol=http&loginTimeout=5", hostPort)
+
+	db, err := sql.Open("snowflake", dsn)
+	if err != nil {
+		t.Fatalf("Failed to open connection: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Verify connection
+	if err := db.PingContext(ctx); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("Connection failed: %v", err)
+	}
+
+	// Create target table
+	_, err = db.ExecContext(ctx, `CREATE TABLE merge_target (id INTEGER, name VARCHAR, value INTEGER)`)
+	if err != nil {
+		t.Fatalf("Failed to create target table: %v", err)
+	}
+
+	// Insert initial data into target
+	_, err = db.ExecContext(ctx, `INSERT INTO merge_target VALUES (1, 'Alice', 100), (2, 'Bob', 200)`)
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	// Create source table
+	_, err = db.ExecContext(ctx, `CREATE TABLE merge_source (id INTEGER, name VARCHAR, value INTEGER)`)
+	if err != nil {
+		t.Fatalf("Failed to create source table: %v", err)
+	}
+
+	// Insert source data (id=2 exists in target, id=3 is new)
+	_, err = db.ExecContext(ctx, `INSERT INTO merge_source VALUES (2, 'Bob Updated', 250), (3, 'Charlie', 300)`)
+	if err != nil {
+		t.Fatalf("Failed to insert source data: %v", err)
+	}
+
+	// Execute MERGE statement
+	// Note: In UPDATE SET clause, use column name without target alias prefix
+	// DuckDB's UPDATE ... FROM syntax requires plain column names in SET
+	_, err = db.ExecContext(ctx, `
+		MERGE INTO merge_target t
+		USING merge_source s
+		ON t.id = s.id
+		WHEN MATCHED THEN UPDATE SET name = s.name, value = s.value
+		WHEN NOT MATCHED THEN INSERT (id, name, value) VALUES (s.id, s.name, s.value)
+	`)
+	if err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("MERGE statement failed: %v", err)
+	}
+	t.Log("MERGE executed successfully")
+
+	// Verify results
+	rows, err := db.QueryContext(ctx, `SELECT id, name, value FROM merge_target ORDER BY id`)
+	if err != nil {
+		t.Fatalf("Failed to query results: %v", err)
+	}
+	defer rows.Close()
+
+	expected := []struct {
+		id    int
+		name  string
+		value int
+	}{
+		{1, "Alice", 100},       // Unchanged
+		{2, "Bob Updated", 250}, // Updated by MERGE
+		{3, "Charlie", 300},     // Inserted by MERGE
+	}
+
+	i := 0
+	for rows.Next() {
+		var id, value int
+		var name string
+		if err := rows.Scan(&id, &name, &value); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		if i >= len(expected) {
+			t.Fatalf("Too many rows returned")
+		}
+
+		if id != expected[i].id || name != expected[i].name || value != expected[i].value {
+			t.Errorf("Row %d: expected (%d, %s, %d), got (%d, %s, %d)",
+				i, expected[i].id, expected[i].name, expected[i].value, id, name, value)
+		}
+		i++
+	}
+
+	if i != len(expected) {
+		t.Errorf("Expected %d rows, got %d", len(expected), i)
+	}
+
+	t.Log("MERGE verification: OK")
 }

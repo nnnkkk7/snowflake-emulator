@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,10 @@ func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 
 	executor := query.NewExecutor(connMgr, repo)
 	stmtMgr := query.NewStatementManager(1 * time.Hour)
+
+	// Initialize MERGE handler for MERGE INTO support
+	mergeHandler := query.NewMergeHandler(executor)
+	executor.SetMergeHandler(mergeHandler)
 
 	restHandler := handlers.NewRestAPIv2Handler(executor, stmtMgr, repo)
 
@@ -1054,4 +1059,133 @@ func TestRESTAPIV2_StatementStatusURL(t *testing.T) {
 	}
 
 	t.Logf("StatementStatusURL: OK (url=%s)", stmtResp.StatementStatusURL)
+}
+
+// TestRESTAPIV2_MergeStatement tests MERGE INTO statement via REST API v2.
+func TestRESTAPIV2_MergeStatement(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	executeStatement := func(statement string) types.StatementResponse {
+		reqBody := types.SubmitStatementRequest{
+			Statement: statement,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		return stmtResp
+	}
+
+	// Create target table
+	resp := executeStatement("CREATE TABLE merge_target (id INTEGER, name VARCHAR, value INTEGER)")
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("Failed to create target table: %s - %s", resp.Code, resp.Message)
+	}
+
+	// Insert initial data into target
+	resp = executeStatement("INSERT INTO merge_target VALUES (1, 'Alice', 100), (2, 'Bob', 200)")
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("Failed to insert initial data: %s - %s", resp.Code, resp.Message)
+	}
+
+	// Create source table
+	resp = executeStatement("CREATE TABLE merge_source (id INTEGER, name VARCHAR, value INTEGER)")
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("Failed to create source table: %s - %s", resp.Code, resp.Message)
+	}
+
+	// Insert source data (id=2 exists in target, id=3 is new)
+	resp = executeStatement("INSERT INTO merge_source VALUES (2, 'Bob Updated', 250), (3, 'Charlie', 300)")
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("Failed to insert source data: %s - %s", resp.Code, resp.Message)
+	}
+
+	// Execute MERGE statement
+	mergeSQL := `MERGE INTO merge_target t
+		USING merge_source s
+		ON t.id = s.id
+		WHEN MATCHED THEN UPDATE SET name = s.name, value = s.value
+		WHEN NOT MATCHED THEN INSERT (id, name, value) VALUES (s.id, s.name, s.value)`
+
+	resp = executeStatement(mergeSQL)
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("MERGE statement failed: %s - %s", resp.Code, resp.Message)
+	}
+	t.Log("MERGE executed successfully via REST API v2")
+
+	// Verify results with SELECT
+	resp = executeStatement("SELECT id, name, value FROM merge_target ORDER BY id")
+	if resp.Code != types.ResponseCodeSuccess {
+		t.Fatalf("Failed to query results: %s - %s", resp.Code, resp.Message)
+	}
+
+	// Verify row count
+	if len(resp.Data) != 3 {
+		t.Errorf("Expected 3 rows after MERGE, got %d", len(resp.Data))
+	}
+
+	// Verify data
+	expected := []struct {
+		id    string
+		name  string
+		value string
+	}{
+		{"1", "Alice", "100"},
+		{"2", "Bob Updated", "250"},
+		{"3", "Charlie", "300"},
+	}
+
+	for i, exp := range expected {
+		if i >= len(resp.Data) {
+			break
+		}
+		row := resp.Data[i]
+		if len(row) < 3 {
+			t.Errorf("Row %d: expected 3 columns, got %d", i, len(row))
+			continue
+		}
+
+		// Convert interface{} to string for comparison
+		id := interfaceToString(row[0])
+		name := interfaceToString(row[1])
+		value := interfaceToString(row[2])
+
+		if id != exp.id || name != exp.name || value != exp.value {
+			t.Errorf("Row %d: expected (%s, %s, %s), got (%s, %s, %s)",
+				i, exp.id, exp.name, exp.value, id, name, value)
+		}
+	}
+
+	t.Log("MERGE verification: OK via REST API v2")
+}
+
+// interfaceToString converts an interface{} to string.
+func interfaceToString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		// Check if it's an integer value
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%f", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
