@@ -45,9 +45,9 @@ func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 	executor := query.NewExecutor(connMgr, repo)
 	stmtMgr := query.NewStatementManager(1 * time.Hour)
 
-	// Initialize MERGE handler for MERGE INTO support
-	mergeHandler := query.NewMergeHandler(executor)
-	executor.SetMergeHandler(mergeHandler)
+	// Initialize MERGE processor for MERGE INTO support
+	mergeProcessor := query.NewMergeProcessor(executor)
+	executor.SetMergeProcessor(mergeProcessor)
 
 	restHandler := handlers.NewRestAPIv2Handler(executor, stmtMgr, repo)
 

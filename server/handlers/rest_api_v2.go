@@ -965,16 +965,16 @@ func (h *RestAPIv2Handler) SuspendWarehouse(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// convertBindings converts types.BindingValue map to query.QueryBindingValue map.
-func convertBindings(bindings map[string]*types.BindingValue) map[string]*query.QueryBindingValue {
+// convertBindings converts types.BindingValue map to query.BindingValue map.
+func convertBindings(bindings map[string]*types.BindingValue) map[string]*query.BindingValue {
 	if bindings == nil {
 		return nil
 	}
 
-	result := make(map[string]*query.QueryBindingValue, len(bindings))
+	result := make(map[string]*query.BindingValue, len(bindings))
 	for key, val := range bindings {
 		if val != nil {
-			result[key] = &query.QueryBindingValue{
+			result[key] = &query.BindingValue{
 				Type:  val.Type,
 				Value: val.Value,
 			}

@@ -11,7 +11,7 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 )
 
-func setupMergeHandlerTest(t *testing.T) (*MergeHandler, *Executor, func()) {
+func setupMergeProcessorTest(t *testing.T) (*MergeProcessor, *Executor, func()) {
 	t.Helper()
 
 	db, err := sql.Open("duckdb", "")
@@ -27,7 +27,7 @@ func setupMergeHandlerTest(t *testing.T) (*MergeHandler, *Executor, func()) {
 	}
 
 	executor := NewExecutor(connMgr, repo)
-	handler := NewMergeHandler(executor)
+	handler := NewMergeProcessor(executor)
 
 	cleanup := func() {
 		db.Close()
@@ -36,8 +36,8 @@ func setupMergeHandlerTest(t *testing.T) (*MergeHandler, *Executor, func()) {
 	return handler, executor, cleanup
 }
 
-func TestMergeHandler_ParseMergeStatement(t *testing.T) {
-	handler, _, cleanup := setupMergeHandlerTest(t)
+func TestMergeProcessor_ParseMergeStatement(t *testing.T) {
+	handler, _, cleanup := setupMergeProcessorTest(t)
 	defer cleanup()
 
 	testCases := []struct {
@@ -199,8 +199,8 @@ func TestMergeHandler_ParseMergeStatement(t *testing.T) {
 	}
 }
 
-func TestMergeHandler_ExecuteMerge_Integration(t *testing.T) {
-	handler, executor, cleanup := setupMergeHandlerTest(t)
+func TestMergeProcessor_ExecuteMerge_Integration(t *testing.T) {
+	handler, executor, cleanup := setupMergeProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()
