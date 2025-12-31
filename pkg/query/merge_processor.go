@@ -46,13 +46,6 @@ type MergeStatement struct {
 	WhenClauses []WhenClause // List of WHEN clauses
 }
 
-// MergeResult contains the result of a MERGE operation.
-type MergeResult struct {
-	RowsInserted int64
-	RowsUpdated  int64
-	RowsDeleted  int64
-}
-
 // mergePatterns holds pre-compiled regex patterns for MERGE statement parsing.
 type mergePatterns struct {
 	mergeInto      *regexp.Regexp
@@ -95,16 +88,16 @@ func newMergePatterns() *mergePatterns {
 	}
 }
 
-// MergeHandler handles MERGE INTO operations.
-type MergeHandler struct {
+// MergeProcessor handles MERGE INTO operations.
+type MergeProcessor struct {
 	executor   *Executor
 	translator *Translator
 	patterns   *mergePatterns
 }
 
-// NewMergeHandler creates a new MERGE handler.
-func NewMergeHandler(executor *Executor) *MergeHandler {
-	return &MergeHandler{
+// NewMergeProcessor creates a new MERGE handler.
+func NewMergeProcessor(executor *Executor) *MergeProcessor {
+	return &MergeProcessor{
 		executor:   executor,
 		translator: NewTranslator(),
 		patterns:   newMergePatterns(),
@@ -114,7 +107,7 @@ func NewMergeHandler(executor *Executor) *MergeHandler {
 // ParseMergeStatement parses a MERGE INTO SQL statement.
 //
 //nolint:gocyclo // parsing logic inherently has many branches
-func (h *MergeHandler) ParseMergeStatement(sql string) (*MergeStatement, error) {
+func (h *MergeProcessor) ParseMergeStatement(sql string) (*MergeStatement, error) {
 	sql = strings.TrimSpace(sql)
 
 	stmt := &MergeStatement{}
@@ -178,7 +171,7 @@ func (h *MergeHandler) ParseMergeStatement(sql string) (*MergeStatement, error) 
 }
 
 // parseWhenClauses extracts all WHEN clauses from the SQL.
-func (h *MergeHandler) parseWhenClauses(sql string) ([]WhenClause, error) {
+func (h *MergeProcessor) parseWhenClauses(sql string) ([]WhenClause, error) {
 	var clauses []WhenClause
 
 	// Find all WHEN MATCHED clauses
@@ -214,7 +207,7 @@ func (h *MergeHandler) parseWhenClauses(sql string) ([]WhenClause, error) {
 // parseWhenClause parses a single WHEN clause.
 //
 //nolint:gocyclo // parsing logic inherently has many branches
-func (h *MergeHandler) parseWhenClause(section, upperSection string) (WhenClause, error) {
+func (h *MergeProcessor) parseWhenClause(section, upperSection string) (WhenClause, error) {
 	clause := WhenClause{}
 
 	// Determine if MATCHED or NOT MATCHED
@@ -279,7 +272,7 @@ func (h *MergeHandler) parseWhenClause(section, upperSection string) (WhenClause
 }
 
 // parseSetClauses parses UPDATE SET assignments.
-func (h *MergeHandler) parseSetClauses(setStr string) ([]SetClause, error) {
+func (h *MergeProcessor) parseSetClauses(setStr string) ([]SetClause, error) {
 	var clauses []SetClause
 
 	// Split by comma, but be careful of commas inside function calls
@@ -354,19 +347,18 @@ func splitByCommaRespectingParens(s string) []string {
 
 // ExecuteMerge executes a parsed MERGE statement.
 // Strategy: Try native DuckDB MERGE first. If unsupported, decompose into UPDATE/DELETE/INSERT.
-func (h *MergeHandler) ExecuteMerge(ctx context.Context, stmt *MergeStatement) (*MergeResult, error) {
+func (h *MergeProcessor) ExecuteMerge(ctx context.Context, stmt *MergeStatement) (*MergeResult, error) {
 	result := &MergeResult{}
 
 	// Build the native MERGE SQL
 	mergeSQL := h.buildMergeSQL(stmt)
 
 	// Try native execution first (DuckDB 1.4+ supports MERGE)
-	execResult, err := h.executor.mgr.Exec(ctx, mergeSQL)
+	execResult, err := h.executor.executeRaw(ctx, mergeSQL)
 	if err == nil {
 		// Native MERGE succeeded
-		rows, _ := execResult.RowsAffected()
 		// DuckDB returns total rows affected; we can't distinguish insert/update/delete
-		result.RowsUpdated = rows
+		result.RowsUpdated = execResult.RowsAffected
 		return result, nil
 	}
 
@@ -375,7 +367,7 @@ func (h *MergeHandler) ExecuteMerge(ctx context.Context, stmt *MergeStatement) (
 }
 
 // buildMergeSQL constructs the MERGE SQL statement for native execution.
-func (h *MergeHandler) buildMergeSQL(stmt *MergeStatement) string {
+func (h *MergeProcessor) buildMergeSQL(stmt *MergeStatement) string {
 	var sb strings.Builder
 
 	// MERGE INTO target [alias]
@@ -408,7 +400,7 @@ func (h *MergeHandler) buildMergeSQL(stmt *MergeStatement) string {
 }
 
 // buildWhenClause builds a single WHEN clause.
-func (h *MergeHandler) buildWhenClause(when *WhenClause) string {
+func (h *MergeProcessor) buildWhenClause(when *WhenClause) string {
 	var sb strings.Builder
 
 	if when.IsMatched {
@@ -451,7 +443,7 @@ func (h *MergeHandler) buildWhenClause(when *WhenClause) string {
 
 // executeDecomposedMerge executes MERGE as separate UPDATE/DELETE/INSERT statements.
 // This fallback is used when native MERGE is not supported.
-func (h *MergeHandler) executeDecomposedMerge(ctx context.Context, stmt *MergeStatement) (*MergeResult, error) {
+func (h *MergeProcessor) executeDecomposedMerge(ctx context.Context, stmt *MergeStatement) (*MergeResult, error) {
 	result := &MergeResult{}
 
 	// Process WHEN MATCHED clauses first (UPDATE/DELETE)
@@ -498,7 +490,7 @@ func (h *MergeHandler) executeDecomposedMerge(ctx context.Context, stmt *MergeSt
 }
 
 // executeMatchedUpdate executes UPDATE for WHEN MATCHED THEN UPDATE.
-func (h *MergeHandler) executeMatchedUpdate(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
+func (h *MergeProcessor) executeMatchedUpdate(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
 	// Build: UPDATE target SET ... FROM source WHERE join_condition [AND when_condition]
 	// DuckDB requires the table name (not alias) in UPDATE clause
 	var sb strings.Builder
@@ -547,17 +539,16 @@ func (h *MergeHandler) executeMatchedUpdate(ctx context.Context, stmt *MergeStat
 		sb.WriteString(condition)
 	}
 
-	execResult, err := h.executor.mgr.Exec(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}
 
-	rows, _ := execResult.RowsAffected()
-	return rows, nil
+	return execResult.RowsAffected, nil
 }
 
 // executeMatchedDelete executes DELETE for WHEN MATCHED THEN DELETE.
-func (h *MergeHandler) executeMatchedDelete(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
+func (h *MergeProcessor) executeMatchedDelete(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
 	// Build: DELETE FROM target USING source WHERE join_condition [AND when_condition]
 	var sb strings.Builder
 
@@ -582,17 +573,16 @@ func (h *MergeHandler) executeMatchedDelete(ctx context.Context, stmt *MergeStat
 		sb.WriteString(when.Condition)
 	}
 
-	execResult, err := h.executor.mgr.Exec(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}
 
-	rows, _ := execResult.RowsAffected()
-	return rows, nil
+	return execResult.RowsAffected, nil
 }
 
 // executeNotMatchedInsert executes INSERT for WHEN NOT MATCHED THEN INSERT.
-func (h *MergeHandler) executeNotMatchedInsert(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
+func (h *MergeProcessor) executeNotMatchedInsert(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
 	// Build: INSERT INTO target (cols) SELECT vals FROM source WHERE NOT EXISTS (...)
 	var sb strings.Builder
 
@@ -632,11 +622,10 @@ func (h *MergeHandler) executeNotMatchedInsert(ctx context.Context, stmt *MergeS
 		sb.WriteString(when.Condition)
 	}
 
-	execResult, err := h.executor.mgr.Exec(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}
 
-	rows, _ := execResult.RowsAffected()
-	return rows, nil
+	return execResult.RowsAffected, nil
 }

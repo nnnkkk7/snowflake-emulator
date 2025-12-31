@@ -14,7 +14,7 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/pkg/stage"
 )
 
-func setupCopyHandlerTest(t *testing.T) (*CopyHandler, *stage.Manager, *metadata.Repository, string, func()) {
+func setupCopyProcessorTest(t *testing.T) (*CopyProcessor, *stage.Manager, *metadata.Repository, string, func()) {
 	t.Helper()
 
 	db, err := sql.Open("duckdb", "")
@@ -38,7 +38,7 @@ func setupCopyHandlerTest(t *testing.T) (*CopyHandler, *stage.Manager, *metadata
 
 	stageMgr := stage.NewManager(repo, tempDir)
 	executor := NewExecutor(connMgr, repo)
-	handler := NewCopyHandler(stageMgr, repo, executor)
+	handler := NewCopyProcessor(stageMgr, repo, executor)
 
 	cleanup := func() {
 		os.RemoveAll(tempDir)
@@ -48,8 +48,8 @@ func setupCopyHandlerTest(t *testing.T) (*CopyHandler, *stage.Manager, *metadata
 	return handler, stageMgr, repo, tempDir, cleanup
 }
 
-func TestCopyHandler_ParseCopyStatement(t *testing.T) {
-	handler, _, _, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ParseCopyStatement(t *testing.T) {
+	handler, _, _, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	testCases := []struct {
@@ -238,8 +238,8 @@ func TestCopyHandler_ParseCopyStatement(t *testing.T) {
 	}
 }
 
-func TestCopyHandler_ExecuteCopyCSV(t *testing.T) {
-	handler, stageMgr, repo, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ExecuteCopyCSV(t *testing.T) {
+	handler, stageMgr, repo, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -301,8 +301,8 @@ func TestCopyHandler_ExecuteCopyCSV(t *testing.T) {
 	}
 }
 
-func TestCopyHandler_ExecuteCopyCSVWithSkipHeader(t *testing.T) {
-	handler, stageMgr, repo, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ExecuteCopyCSVWithSkipHeader(t *testing.T) {
+	handler, stageMgr, repo, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -342,8 +342,8 @@ func TestCopyHandler_ExecuteCopyCSVWithSkipHeader(t *testing.T) {
 	}
 }
 
-func TestCopyHandler_ExecuteCopyJSON(t *testing.T) {
-	handler, stageMgr, repo, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ExecuteCopyJSON(t *testing.T) {
+	handler, stageMgr, repo, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -390,8 +390,8 @@ func TestCopyHandler_ExecuteCopyJSON(t *testing.T) {
 	}
 }
 
-func TestCopyHandler_ExecuteCopyWithPurge(t *testing.T) {
-	handler, stageMgr, repo, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ExecuteCopyWithPurge(t *testing.T) {
+	handler, stageMgr, repo, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -451,8 +451,8 @@ func TestCopyHandler_ExecuteCopyWithPurge(t *testing.T) {
 	}
 }
 
-func TestCopyHandler_ExecuteCopyNoFiles(t *testing.T) {
-	handler, stageMgr, repo, _, cleanup := setupCopyHandlerTest(t)
+func TestCopyProcessor_ExecuteCopyNoFiles(t *testing.T) {
+	handler, stageMgr, repo, _, cleanup := setupCopyProcessorTest(t)
 	defer cleanup()
 
 	ctx := context.Background()

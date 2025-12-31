@@ -102,15 +102,20 @@ func (m *TypeMapper) InferRowType(columns []string, rows *sql.Rows) []types.Colu
 	return rowType
 }
 
-// DefaultTypeMapper is the default type mapper instance.
-var DefaultTypeMapper = NewTypeMapper()
+// defaultTypeMapper is the package-level type mapper instance.
+// Prefer using convenience functions MapDuckDBTypeToSnowflake and InferColumnMetadata.
+var defaultTypeMapper = NewTypeMapper()
+
+// Deprecated: DefaultTypeMapper is exposed for backward compatibility.
+// Use MapDuckDBTypeToSnowflake or InferColumnMetadata convenience functions instead.
+var DefaultTypeMapper = defaultTypeMapper
 
 // MapDuckDBTypeToSnowflake is a convenience function using the default mapper.
 func MapDuckDBTypeToSnowflake(duckType string) string {
-	return DefaultTypeMapper.MapDuckDBType(duckType)
+	return defaultTypeMapper.MapDuckDBType(duckType)
 }
 
 // InferColumnMetadata is a convenience function using the default mapper.
 func InferColumnMetadata(columns []string, rows *sql.Rows) []types.ColumnMetadata {
-	return DefaultTypeMapper.InferRowType(columns, rows)
+	return defaultTypeMapper.InferRowType(columns, rows)
 }

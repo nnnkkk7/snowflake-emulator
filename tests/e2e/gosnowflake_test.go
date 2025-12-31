@@ -60,9 +60,9 @@ func setupTestEmulator(t *testing.T) *httptest.Server {
 	sessionMgr := session.NewManager(1 * time.Hour)
 	executor := query.NewExecutor(connMgr, repo)
 
-	// Initialize MERGE handler for MERGE INTO support
-	mergeHandler := query.NewMergeHandler(executor)
-	executor.SetMergeHandler(mergeHandler)
+	// Initialize MERGE processor for MERGE INTO support
+	mergeProcessor := query.NewMergeProcessor(executor)
+	executor.Configure(query.WithMergeProcessor(mergeProcessor))
 
 	sessionHandler := handlers.NewSessionHandler(sessionMgr, repo)
 	queryHandler := handlers.NewQueryHandler(executor, sessionMgr)

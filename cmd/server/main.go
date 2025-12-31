@@ -60,13 +60,15 @@ func main() {
 	}
 	stageMgr := stage.NewManager(repo, stageDir)
 
-	// Initialize COPY handler and wire to executor
-	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
-	executor.SetCopyHandler(copyHandler)
-
-	// Initialize MERGE handler and wire to executor
-	mergeHandler := query.NewMergeHandler(executor)
-	executor.SetMergeHandler(mergeHandler)
+	// Initialize processors and wire to executor.
+	// Due to circular dependency (processors need executor, executor needs processors),
+	// we create processors first, then configure executor with them.
+	copyProcessor := query.NewCopyProcessor(stageMgr, repo, executor)
+	mergeProcessor := query.NewMergeProcessor(executor)
+	executor.Configure(
+		query.WithCopyProcessor(copyProcessor),
+		query.WithMergeProcessor(mergeProcessor),
+	)
 
 	sessionHandler := handlers.NewSessionHandler(sessionMgr, repo)
 	queryHandler := handlers.NewQueryHandler(executor, sessionMgr)

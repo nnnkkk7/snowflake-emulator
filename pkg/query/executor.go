@@ -12,7 +12,6 @@ import (
 
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
-	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
 // Binding validation regexes to prevent SQL injection
@@ -25,54 +24,51 @@ var (
 	timestampRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$`)
 )
 
-// QueryBindingValue represents a parameter binding value for SQL queries.
-// This mirrors the REST API v2 binding format.
-// Named QueryBindingValue to avoid conflict with types.BindingValue in server/types.
-//
-//nolint:revive // stuttering is intentional to avoid ambiguity with types.BindingValue
-type QueryBindingValue struct {
-	Type  string // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
-	Value string // String representation of the value
-}
-
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
 type Executor struct {
-	mgr          *connection.Manager
-	repo         *metadata.Repository
-	translator   *Translator
-	copyHandler  *CopyHandler
-	mergeHandler *MergeHandler
+	mgr            *connection.Manager
+	repo           *metadata.Repository
+	translator     *Translator
+	copyProcessor  *CopyProcessor
+	mergeProcessor *MergeProcessor
 }
 
-// Result represents the result of a query execution.
-type Result struct {
-	Columns     []string
-	ColumnTypes []types.ColumnMetadata
-	Rows        [][]interface{}
+// ExecutorOption configures an Executor.
+type ExecutorOption func(*Executor)
+
+// WithCopyProcessor sets the COPY processor for executing COPY INTO statements.
+func WithCopyProcessor(processor *CopyProcessor) ExecutorOption {
+	return func(e *Executor) {
+		e.copyProcessor = processor
+	}
 }
 
-// ExecResult represents the result of a non-query execution (INSERT, UPDATE, DELETE, etc.).
-type ExecResult struct {
-	RowsAffected int64
+// WithMergeProcessor sets the MERGE processor for executing MERGE INTO statements.
+func WithMergeProcessor(processor *MergeProcessor) ExecutorOption {
+	return func(e *Executor) {
+		e.mergeProcessor = processor
+	}
 }
 
 // NewExecutor creates a new query executor.
-func NewExecutor(mgr *connection.Manager, repo *metadata.Repository) *Executor {
-	return &Executor{
+func NewExecutor(mgr *connection.Manager, repo *metadata.Repository, opts ...ExecutorOption) *Executor {
+	e := &Executor{
 		mgr:        mgr,
 		repo:       repo,
 		translator: NewTranslator(),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
-// SetCopyHandler sets the COPY handler for executing COPY INTO statements.
-func (e *Executor) SetCopyHandler(handler *CopyHandler) {
-	e.copyHandler = handler
-}
-
-// SetMergeHandler sets the MERGE handler for executing MERGE INTO statements.
-func (e *Executor) SetMergeHandler(handler *MergeHandler) {
-	e.mergeHandler = handler
+// Configure applies options to an existing Executor.
+// Use this to resolve circular dependencies when processors need the executor reference.
+func (e *Executor) Configure(opts ...ExecutorOption) {
+	for _, opt := range opts {
+		opt(e)
+	}
 }
 
 // Query executes a SELECT query and returns results.
@@ -329,6 +325,14 @@ func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error)
 		return e.executeMerge(ctx, sql)
 	}
 
+	// Execute regular SQL statement
+	return e.executeRaw(ctx, sql)
+}
+
+// executeRaw executes a SQL statement without classification or processor delegation.
+// Use this from processors (COPY, MERGE) to avoid infinite recursion.
+// This is a private method as it's only called from same-package processors.
+func (e *Executor) executeRaw(ctx context.Context, sql string) (*ExecResult, error) {
 	// Translate Snowflake SQL to DuckDB SQL
 	translatedSQL, err := e.translator.Translate(sql)
 	if err != nil {
@@ -423,12 +427,12 @@ func (e *Executor) executeTransaction(ctx context.Context, sql string) (*ExecRes
 
 // executeCopy handles COPY INTO statements.
 func (e *Executor) executeCopy(ctx context.Context, sql string) (*ExecResult, error) {
-	if e.copyHandler == nil {
-		return nil, fmt.Errorf("COPY handler not configured")
+	if e.copyProcessor == nil {
+		return nil, fmt.Errorf("COPY processor not configured")
 	}
 
 	// Parse the COPY statement
-	stmt, err := e.copyHandler.ParseCopyStatement(sql)
+	stmt, err := e.copyProcessor.ParseCopyStatement(sql)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse COPY statement: %w", err)
 	}
@@ -450,7 +454,7 @@ func (e *Executor) executeCopy(ctx context.Context, sql string) (*ExecResult, er
 	}
 
 	// Execute COPY INTO with resolved schema context
-	result, err := e.copyHandler.ExecuteCopyInto(ctx, stmt, schemaID)
+	result, err := e.copyProcessor.ExecuteCopyInto(ctx, stmt, schemaID)
 	if err != nil {
 		return nil, fmt.Errorf("COPY INTO failed: %w", err)
 	}
@@ -462,18 +466,18 @@ func (e *Executor) executeCopy(ctx context.Context, sql string) (*ExecResult, er
 
 // executeMerge handles MERGE INTO statements.
 func (e *Executor) executeMerge(ctx context.Context, sql string) (*ExecResult, error) {
-	if e.mergeHandler == nil {
-		return nil, fmt.Errorf("MERGE handler not configured")
+	if e.mergeProcessor == nil {
+		return nil, fmt.Errorf("MERGE processor not configured")
 	}
 
 	// Parse the MERGE statement
-	stmt, err := e.mergeHandler.ParseMergeStatement(sql)
+	stmt, err := e.mergeProcessor.ParseMergeStatement(sql)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse MERGE statement: %w", err)
 	}
 
 	// Execute MERGE
-	result, err := e.mergeHandler.ExecuteMerge(ctx, stmt)
+	result, err := e.mergeProcessor.ExecuteMerge(ctx, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("MERGE failed: %w", err)
 	}

@@ -55,12 +55,13 @@ func setupTestServer(t *testing.T) (*httptest.Server, *session.Manager, *metadat
 	})
 	stageMgr := stage.NewManager(repo, stageDir)
 
-	// Wire handlers to executor
-	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
-	executor.SetCopyHandler(copyHandler)
-
-	mergeHandler := query.NewMergeHandler(executor)
-	executor.SetMergeHandler(mergeHandler)
+	// Wire processors to executor
+	copyProcessor := query.NewCopyProcessor(stageMgr, repo, executor)
+	mergeProcessor := query.NewMergeProcessor(executor)
+	executor.Configure(
+		query.WithCopyProcessor(copyProcessor),
+		query.WithMergeProcessor(mergeProcessor),
+	)
 
 	// Create test database and schema
 	ctx := context.Background()
@@ -772,8 +773,8 @@ func TestIntegration_CopyInto(t *testing.T) {
 
 	stageMgr := stage.NewManager(repo, stageDir)
 	executor := query.NewExecutor(mgr, repo)
-	copyHandler := query.NewCopyHandler(stageMgr, repo, executor)
-	executor.SetCopyHandler(copyHandler)
+	copyProcessor := query.NewCopyProcessor(stageMgr, repo, executor)
+	executor.Configure(query.WithCopyProcessor(copyProcessor))
 
 	// Create stage
 	_, err = stageMgr.CreateStage(ctx, schema.ID, "TEST_STAGE", "INTERNAL", "", "")

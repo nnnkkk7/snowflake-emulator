@@ -198,15 +198,20 @@ func (c *Classifier) IsMerge(sql string) bool {
 	return strings.HasPrefix(upperSQL, "MERGE")
 }
 
+// IsTransaction checks if the SQL is a transaction control statement.
+func (c *Classifier) IsTransaction(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return c.isTransactionStatement(upperSQL)
+}
+
 // IsMerge is a convenience function to check if SQL is a MERGE statement.
 func IsMerge(sql string) bool {
 	return DefaultClassifier.IsMerge(sql)
 }
 
-// IsTransaction checks if the SQL is a transaction control statement.
+// IsTransaction is a convenience function to check if SQL is a transaction statement.
 func IsTransaction(sql string) bool {
-	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
-	return DefaultClassifier.isTransactionStatement(upperSQL)
+	return DefaultClassifier.IsTransaction(sql)
 }
 
 // IsBegin checks if the SQL is a BEGIN/START TRANSACTION statement.

@@ -45,16 +45,8 @@ type FileFormatOptions struct {
 	StripNullValues bool // For JSON
 }
 
-// CopyResult contains the result of a COPY INTO operation.
-type CopyResult struct {
-	RowsLoaded   int64
-	RowsInserted int64
-	FilesLoaded  int
-	Errors       []string
-}
-
 // copyPatterns holds pre-compiled regex patterns for COPY statement parsing.
-// Stored in CopyHandler to avoid global state and enable heap allocation.
+// Stored in CopyProcessor to avoid global state and enable heap allocation.
 type copyPatterns struct {
 	copyInto        *regexp.Regexp
 	fileFormat      *regexp.Regexp
@@ -69,7 +61,7 @@ type copyPatterns struct {
 // newCopyPatterns creates pre-compiled regex patterns.
 func newCopyPatterns() *copyPatterns {
 	return &copyPatterns{
-		copyInto:        regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/[^\s]*)?`),
+		copyInto:        regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/\S*)?`),
 		fileFormat:      regexp.MustCompile(`(?i)FILE_FORMAT\s*=\s*\(([^)]+)\)`),
 		pattern:         regexp.MustCompile(`(?i)PATTERN\s*=\s*'([^']+)'`),
 		onError:         regexp.MustCompile(`(?i)ON_ERROR\s*=\s*(\w+)`),
@@ -94,26 +86,28 @@ func extractMatchUpper(re *regexp.Regexp, input, defaultVal string) string {
 	return strings.ToUpper(extractMatch(re, input, defaultVal))
 }
 
-// CopyHandler handles COPY INTO operations.
-type CopyHandler struct {
-	stageMgr *stage.Manager
-	repo     *metadata.Repository
-	executor *Executor
-	patterns *copyPatterns
+// CopyProcessor handles COPY INTO operations.
+type CopyProcessor struct {
+	stageMgr   *stage.Manager
+	repo       *metadata.Repository
+	executor   *Executor
+	tableNamer *DefaultTableNamer
+	patterns   *copyPatterns
 }
 
-// NewCopyHandler creates a new COPY handler.
-func NewCopyHandler(stageMgr *stage.Manager, repo *metadata.Repository, executor *Executor) *CopyHandler {
-	return &CopyHandler{
-		stageMgr: stageMgr,
-		repo:     repo,
-		executor: executor,
-		patterns: newCopyPatterns(),
+// NewCopyProcessor creates a new COPY handler.
+func NewCopyProcessor(stageMgr *stage.Manager, repo *metadata.Repository, executor *Executor) *CopyProcessor {
+	return &CopyProcessor{
+		stageMgr:   stageMgr,
+		repo:       repo,
+		executor:   executor,
+		tableNamer: NewTableNamer(),
+		patterns:   newCopyPatterns(),
 	}
 }
 
 // ParseCopyStatement parses a COPY INTO SQL statement.
-func (h *CopyHandler) ParseCopyStatement(sql string) (*CopyStatement, error) {
+func (h *CopyProcessor) ParseCopyStatement(sql string) (*CopyStatement, error) {
 	sql = strings.TrimSpace(sql)
 
 	// Match COPY INTO table FROM @stage[/path]
@@ -181,7 +175,7 @@ func (h *CopyHandler) ParseCopyStatement(sql string) (*CopyStatement, error) {
 }
 
 // parseFileFormatOptions parses FILE_FORMAT options string.
-func (h *CopyHandler) parseFileFormatOptions(opts *FileFormatOptions, optStr string) {
+func (h *CopyProcessor) parseFileFormatOptions(opts *FileFormatOptions, optStr string) {
 	optStr = strings.TrimSpace(optStr)
 
 	// TYPE
@@ -218,7 +212,9 @@ func (h *CopyHandler) parseFileFormatOptions(opts *FileFormatOptions, optStr str
 }
 
 // ExecuteCopyInto executes a COPY INTO statement.
-func (h *CopyHandler) ExecuteCopyInto(ctx context.Context, stmt *CopyStatement, defaultSchemaID string) (*CopyResult, error) {
+//
+//nolint:gocyclo // complex file loading logic with multiple format handlers
+func (h *CopyProcessor) ExecuteCopyInto(ctx context.Context, stmt *CopyStatement, defaultSchemaID string) (*CopyResult, error) {
 	result := &CopyResult{}
 
 	// Resolve schema ID for the stage
@@ -300,7 +296,9 @@ func (h *CopyHandler) ExecuteCopyInto(ctx context.Context, stmt *CopyStatement, 
 }
 
 // loadCSVFile loads a CSV file into the target table.
-func (h *CopyHandler) loadCSVFile(ctx context.Context, stmt *CopyStatement, schemaID, fileName string) (int64, error) {
+//
+//nolint:gocyclo // CSV parsing logic with multiple format options
+func (h *CopyProcessor) loadCSVFile(ctx context.Context, stmt *CopyStatement, schemaID, fileName string) (int64, error) {
 	// Get file reader
 	reader, err := h.stageMgr.GetFile(ctx, schemaID, stmt.StageName, fileName)
 	if err != nil {
@@ -335,16 +333,8 @@ func (h *CopyHandler) loadCSVFile(ctx context.Context, stmt *CopyStatement, sche
 		return 0, nil
 	}
 
-	// Build INSERT statement
-	// Use the same naming convention as repository.CreateTable: DB.SCHEMA_TABLE
-	tableName := stmt.TargetTable
-	if stmt.TargetSchema != "" && stmt.TargetDatabase != "" {
-		// Fully qualified: DB.SCHEMA_TABLE
-		tableName = stmt.TargetDatabase + "." + stmt.TargetSchema + "_" + tableName
-	} else if stmt.TargetSchema != "" {
-		// Schema qualified: SCHEMA_TABLE
-		tableName = stmt.TargetSchema + "_" + tableName
-	}
+	// Build INSERT statement using centralized table naming
+	tableName := h.tableNamer.BuildDuckDBTableName(stmt.TargetDatabase, stmt.TargetSchema, stmt.TargetTable)
 
 	var rowsInserted int64
 	for _, record := range records {
@@ -374,7 +364,7 @@ func (h *CopyHandler) loadCSVFile(ctx context.Context, stmt *CopyStatement, sche
 
 		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", tableName, strings.Join(values, ", "))
 
-		_, err := h.executor.Execute(ctx, insertSQL)
+		_, err := h.executor.executeRaw(ctx, insertSQL)
 		if err != nil {
 			return rowsInserted, fmt.Errorf("failed to insert row: %w", err)
 		}
@@ -385,7 +375,7 @@ func (h *CopyHandler) loadCSVFile(ctx context.Context, stmt *CopyStatement, sche
 }
 
 // loadJSONFile loads a JSON file into the target table.
-func (h *CopyHandler) loadJSONFile(ctx context.Context, stmt *CopyStatement, schemaID, fileName string) (int64, error) {
+func (h *CopyProcessor) loadJSONFile(ctx context.Context, stmt *CopyStatement, schemaID, fileName string) (int64, error) {
 	// Get file reader
 	reader, err := h.stageMgr.GetFile(ctx, schemaID, stmt.StageName, fileName)
 	if err != nil {
@@ -430,16 +420,8 @@ func (h *CopyHandler) loadJSONFile(ctx context.Context, stmt *CopyStatement, sch
 		return 0, nil
 	}
 
-	// Build table name
-	// Use the same naming convention as repository.CreateTable: DB.SCHEMA_TABLE
-	tableName := stmt.TargetTable
-	if stmt.TargetSchema != "" && stmt.TargetDatabase != "" {
-		// Fully qualified: DB.SCHEMA_TABLE
-		tableName = stmt.TargetDatabase + "." + stmt.TargetSchema + "_" + tableName
-	} else if stmt.TargetSchema != "" {
-		// Schema qualified: SCHEMA_TABLE
-		tableName = stmt.TargetSchema + "_" + tableName
-	}
+	// Build table name using centralized table naming
+	tableName := h.tableNamer.BuildDuckDBTableName(stmt.TargetDatabase, stmt.TargetSchema, stmt.TargetTable)
 
 	var rowsInserted int64
 	for _, record := range records {
@@ -452,7 +434,7 @@ func (h *CopyHandler) loadJSONFile(ctx context.Context, stmt *CopyStatement, sch
 		// Insert as JSON/VARIANT
 		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES ('%s')", tableName, strings.ReplaceAll(string(jsonBytes), "'", "''"))
 
-		_, err = h.executor.Execute(ctx, insertSQL)
+		_, err = h.executor.executeRaw(ctx, insertSQL)
 		if err != nil {
 			return rowsInserted, fmt.Errorf("failed to insert JSON row: %w", err)
 		}
