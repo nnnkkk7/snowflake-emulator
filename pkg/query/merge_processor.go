@@ -90,13 +90,13 @@ func newMergePatterns() *mergePatterns {
 
 // MergeProcessor handles MERGE INTO operations.
 type MergeProcessor struct {
-	executor   SQLExecutor
+	executor   *Executor
 	translator SQLTranslator
 	patterns   *mergePatterns
 }
 
 // NewMergeProcessor creates a new MERGE handler.
-func NewMergeProcessor(executor SQLExecutor) *MergeProcessor {
+func NewMergeProcessor(executor *Executor) *MergeProcessor {
 	return &MergeProcessor{
 		executor:   executor,
 		translator: NewTranslator(),
@@ -354,7 +354,7 @@ func (h *MergeProcessor) ExecuteMerge(ctx context.Context, stmt *MergeStatement)
 	mergeSQL := h.buildMergeSQL(stmt)
 
 	// Try native execution first (DuckDB 1.4+ supports MERGE)
-	execResult, err := h.executor.ExecuteRaw(ctx, mergeSQL)
+	execResult, err := h.executor.executeRaw(ctx, mergeSQL)
 	if err == nil {
 		// Native MERGE succeeded
 		// DuckDB returns total rows affected; we can't distinguish insert/update/delete
@@ -539,7 +539,7 @@ func (h *MergeProcessor) executeMatchedUpdate(ctx context.Context, stmt *MergeSt
 		sb.WriteString(condition)
 	}
 
-	execResult, err := h.executor.ExecuteRaw(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}
@@ -573,7 +573,7 @@ func (h *MergeProcessor) executeMatchedDelete(ctx context.Context, stmt *MergeSt
 		sb.WriteString(when.Condition)
 	}
 
-	execResult, err := h.executor.ExecuteRaw(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}
@@ -622,7 +622,7 @@ func (h *MergeProcessor) executeNotMatchedInsert(ctx context.Context, stmt *Merg
 		sb.WriteString(when.Condition)
 	}
 
-	execResult, err := h.executor.ExecuteRaw(ctx, sb.String())
+	execResult, err := h.executor.executeRaw(ctx, sb.String())
 	if err != nil {
 		return 0, err
 	}

@@ -90,13 +90,13 @@ func extractMatchUpper(re *regexp.Regexp, input, defaultVal string) string {
 type CopyProcessor struct {
 	stageMgr   *stage.Manager
 	repo       *metadata.Repository
-	executor   SQLExecutor
+	executor   *Executor
 	tableNamer TableNamer
 	patterns   *copyPatterns
 }
 
 // NewCopyProcessor creates a new COPY handler.
-func NewCopyProcessor(stageMgr *stage.Manager, repo *metadata.Repository, executor SQLExecutor) *CopyProcessor {
+func NewCopyProcessor(stageMgr *stage.Manager, repo *metadata.Repository, executor *Executor) *CopyProcessor {
 	return &CopyProcessor{
 		stageMgr:   stageMgr,
 		repo:       repo,
@@ -364,7 +364,7 @@ func (h *CopyProcessor) loadCSVFile(ctx context.Context, stmt *CopyStatement, sc
 
 		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", tableName, strings.Join(values, ", "))
 
-		_, err := h.executor.ExecuteRaw(ctx, insertSQL)
+		_, err := h.executor.executeRaw(ctx, insertSQL)
 		if err != nil {
 			return rowsInserted, fmt.Errorf("failed to insert row: %w", err)
 		}
@@ -434,7 +434,7 @@ func (h *CopyProcessor) loadJSONFile(ctx context.Context, stmt *CopyStatement, s
 		// Insert as JSON/VARIANT
 		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES ('%s')", tableName, strings.ReplaceAll(string(jsonBytes), "'", "''"))
 
-		_, err = h.executor.ExecuteRaw(ctx, insertSQL)
+		_, err = h.executor.executeRaw(ctx, insertSQL)
 		if err != nil {
 			return rowsInserted, fmt.Errorf("failed to insert JSON row: %w", err)
 		}

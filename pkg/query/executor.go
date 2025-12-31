@@ -67,18 +67,12 @@ func NewExecutor(mgr *connection.Manager, repo *metadata.Repository, opts ...Exe
 	return e
 }
 
-// SetCopyProcessor sets the COPY processor for executing COPY INTO statements.
-//
-// Deprecated: Use WithCopyProcessor option in NewExecutor instead.
-func (e *Executor) SetCopyProcessor(processor *CopyProcessor) {
-	e.copyProcessor = processor
-}
-
-// SetMergeProcessor sets the MERGE processor for executing MERGE INTO statements.
-//
-// Deprecated: Use WithMergeProcessor option in NewExecutor instead.
-func (e *Executor) SetMergeProcessor(processor *MergeProcessor) {
-	e.mergeProcessor = processor
+// Configure applies options to an existing Executor.
+// Use this to resolve circular dependencies when processors need the executor reference.
+func (e *Executor) Configure(opts ...ExecutorOption) {
+	for _, opt := range opts {
+		opt(e)
+	}
 }
 
 // Query executes a SELECT query and returns results.
@@ -335,31 +329,14 @@ func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error)
 		return e.executeMerge(ctx, sql)
 	}
 
-	// Translate Snowflake SQL to DuckDB SQL
-	translatedSQL, err := e.translator.Translate(sql)
-	if err != nil {
-		return nil, fmt.Errorf("translation error: %w", err)
-	}
-
-	// Execute statement
-	result, err := e.mgr.Exec(ctx, translatedSQL)
-	if err != nil {
-		return nil, fmt.Errorf("execution error: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	return &ExecResult{
-		RowsAffected: rowsAffected,
-	}, nil
+	// Execute regular SQL statement
+	return e.executeRaw(ctx, sql)
 }
 
-// ExecuteRaw executes a SQL statement without classification or processor delegation.
+// executeRaw executes a SQL statement without classification or processor delegation.
 // Use this from processors (COPY, MERGE) to avoid infinite recursion.
-func (e *Executor) ExecuteRaw(ctx context.Context, sql string) (*ExecResult, error) {
+// This is a private method as it's only called from same-package processors.
+func (e *Executor) executeRaw(ctx context.Context, sql string) (*ExecResult, error) {
 	// Translate Snowflake SQL to DuckDB SQL
 	translatedSQL, err := e.translator.Translate(sql)
 	if err != nil {

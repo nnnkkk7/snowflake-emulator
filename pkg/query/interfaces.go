@@ -12,10 +12,6 @@ type SQLExecutor interface {
 	// This method includes statement classification and may delegate to processors.
 	Execute(ctx context.Context, sql string) (*ExecResult, error)
 
-	// ExecuteRaw runs a SQL statement without classification or processor delegation.
-	// Use this from processors to avoid infinite recursion.
-	ExecuteRaw(ctx context.Context, sql string) (*ExecResult, error)
-
 	// Query executes a SELECT query and returns results.
 	Query(ctx context.Context, sql string) (*Result, error)
 
