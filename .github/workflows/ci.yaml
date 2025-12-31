@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   ci:
-    name: CI (lint + test)
+    name: Lint & Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -27,3 +27,42 @@ jobs:
 
       - name: Run tests
         run: make test-all
+
+  docker:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build Docker image
+        run: docker compose build
+
+      - name: Start emulator container
+        run: docker compose up -d
+
+      - name: Wait for emulator to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "Emulator is ready"
+              exit 0
+            fi
+            echo "Waiting for emulator... ($i/30)"
+            sleep 1
+          done
+          echo "Emulator failed to start"
+          docker compose logs
+          exit 1
+
+      - name: Run Docker example
+        run: go run ./example/docker
+
+      - name: Stop emulator container
+        if: always()
+        run: docker compose down
