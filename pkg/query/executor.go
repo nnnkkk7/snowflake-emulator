@@ -25,7 +25,6 @@ var (
 )
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
-// It implements the SQLExecutor interface.
 type Executor struct {
 	mgr            *connection.Manager
 	repo           *metadata.Repository
@@ -33,9 +32,6 @@ type Executor struct {
 	copyProcessor  *CopyProcessor
 	mergeProcessor *MergeProcessor
 }
-
-// Compile-time check that Executor implements SQLExecutor.
-var _ SQLExecutor = (*Executor)(nil)
 
 // ExecutorOption configures an Executor.
 type ExecutorOption func(*Executor)

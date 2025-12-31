@@ -91,7 +91,7 @@ func newMergePatterns() *mergePatterns {
 // MergeProcessor handles MERGE INTO operations.
 type MergeProcessor struct {
 	executor   *Executor
-	translator SQLTranslator
+	translator *Translator
 	patterns   *mergePatterns
 }
 

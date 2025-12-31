@@ -91,7 +91,7 @@ type CopyProcessor struct {
 	stageMgr   *stage.Manager
 	repo       *metadata.Repository
 	executor   *Executor
-	tableNamer TableNamer
+	tableNamer *DefaultTableNamer
 	patterns   *copyPatterns
 }
 

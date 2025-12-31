@@ -45,3 +45,10 @@ type MergeResult struct {
 	RowsUpdated  int64
 	RowsDeleted  int64
 }
+
+// SchemaContext provides database/schema context for operations.
+type SchemaContext struct {
+	DatabaseName string
+	SchemaName   string
+	SchemaID     string
+}

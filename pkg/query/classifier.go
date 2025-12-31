@@ -24,11 +24,7 @@ const (
 )
 
 // Classifier provides SQL statement classification functionality.
-// It implements the StatementClassifier interface.
 type Classifier struct{}
-
-// Compile-time check that Classifier implements StatementClassifier.
-var _ StatementClassifier = (*Classifier)(nil)
 
 // NewClassifier creates a new SQL classifier.
 func NewClassifier() *Classifier {
