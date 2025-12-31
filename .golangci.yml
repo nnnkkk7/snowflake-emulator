@@ -148,6 +148,10 @@ linters:
       - path: pkg/types/
         linters:
           - goconst
+      # Server types package - "types" is a conventional name for API type definitions
+      - path: server/types/
+        linters:
+          - revive
 
 issues:
   # Maximum issues count per linter (0 = unlimited)

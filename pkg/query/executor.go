@@ -212,6 +212,8 @@ func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[stri
 }
 
 // formatBindingValue formats a binding value for SQL substitution.
+//
+//nolint:gocyclo // switch statement for type handling inherently has many branches
 func formatBindingValue(b *QueryBindingValue) (string, error) {
 	if b == nil {
 		return ValueNull, nil
