@@ -392,6 +392,26 @@ func (r *Repository) DropDatabase(ctx context.Context, id string) error {
 	return err
 }
 
+// UpdateDatabaseComment updates the comment of a database.
+func (r *Repository) UpdateDatabaseComment(ctx context.Context, id, comment string) error {
+	query := `UPDATE _metadata_databases SET comment = ? WHERE id = ?`
+	result, err := r.mgr.Exec(ctx, query, comment, id)
+	if err != nil {
+		return fmt.Errorf("failed to update database comment: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("database with ID %s not found", id)
+	}
+
+	return nil
+}
+
 // CreateSchema creates a new schema in a database.
 func (r *Repository) CreateSchema(ctx context.Context, databaseID, name, comment string) (*Schema, error) {
 	if name == "" {
@@ -820,6 +840,26 @@ func (r *Repository) DropTable(ctx context.Context, id string) error {
 	})
 
 	return err
+}
+
+// UpdateTableComment updates the comment of a table.
+func (r *Repository) UpdateTableComment(ctx context.Context, id, comment string) error {
+	query := `UPDATE _metadata_tables SET comment = ? WHERE id = ?`
+	result, err := r.mgr.Exec(ctx, query, comment, id)
+	if err != nil {
+		return fmt.Errorf("failed to update table comment: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("table with ID %s not found", id)
+	}
+
+	return nil
 }
 
 // serializeColumnDefs converts column definitions to a simple string format.

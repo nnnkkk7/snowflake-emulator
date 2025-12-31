@@ -53,11 +53,53 @@ type CopyResult struct {
 	Errors       []string
 }
 
+// copyPatterns holds pre-compiled regex patterns for COPY statement parsing.
+// Stored in CopyHandler to avoid global state and enable heap allocation.
+type copyPatterns struct {
+	copyInto        *regexp.Regexp
+	fileFormat      *regexp.Regexp
+	pattern         *regexp.Regexp
+	onError         *regexp.Regexp
+	formatType      *regexp.Regexp
+	fieldDelimiter  *regexp.Regexp
+	recordDelimiter *regexp.Regexp
+	skipHeader      *regexp.Regexp
+}
+
+// newCopyPatterns creates pre-compiled regex patterns.
+func newCopyPatterns() *copyPatterns {
+	return &copyPatterns{
+		copyInto:        regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/[^\s]*)?`),
+		fileFormat:      regexp.MustCompile(`(?i)FILE_FORMAT\s*=\s*\(([^)]+)\)`),
+		pattern:         regexp.MustCompile(`(?i)PATTERN\s*=\s*'([^']+)'`),
+		onError:         regexp.MustCompile(`(?i)ON_ERROR\s*=\s*(\w+)`),
+		formatType:      regexp.MustCompile(`(?i)TYPE\s*=\s*(\w+)`),
+		fieldDelimiter:  regexp.MustCompile(`(?i)FIELD_DELIMITER\s*=\s*'([^']*)'`),
+		recordDelimiter: regexp.MustCompile(`(?i)RECORD_DELIMITER\s*=\s*'([^']*)'`),
+		skipHeader:      regexp.MustCompile(`(?i)SKIP_HEADER\s*=\s*(\d+)`),
+	}
+}
+
+// extractMatch extracts the first capture group from a regex match.
+// Returns defaultVal if no match is found.
+func extractMatch(re *regexp.Regexp, input, defaultVal string) string {
+	if match := re.FindStringSubmatch(input); len(match) > 1 {
+		return match[1]
+	}
+	return defaultVal
+}
+
+// extractMatchUpper extracts the first capture group and converts to uppercase.
+func extractMatchUpper(re *regexp.Regexp, input, defaultVal string) string {
+	return strings.ToUpper(extractMatch(re, input, defaultVal))
+}
+
 // CopyHandler handles COPY INTO operations.
 type CopyHandler struct {
 	stageMgr *stage.Manager
 	repo     *metadata.Repository
 	executor *Executor
+	patterns *copyPatterns
 }
 
 // NewCopyHandler creates a new COPY handler.
@@ -66,6 +108,7 @@ func NewCopyHandler(stageMgr *stage.Manager, repo *metadata.Repository, executor
 		stageMgr: stageMgr,
 		repo:     repo,
 		executor: executor,
+		patterns: newCopyPatterns(),
 	}
 }
 
@@ -73,11 +116,8 @@ func NewCopyHandler(stageMgr *stage.Manager, repo *metadata.Repository, executor
 func (h *CopyHandler) ParseCopyStatement(sql string) (*CopyStatement, error) {
 	sql = strings.TrimSpace(sql)
 
-	// Basic regex for COPY INTO table FROM @stage
-	// COPY INTO table FROM @stage[/path] [FILE_FORMAT = (...)] [FILES = (...)] [PATTERN = '...']
-	copyRegex := regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/[^\s]*)?`)
-	matches := copyRegex.FindStringSubmatch(sql)
-
+	// Match COPY INTO table FROM @stage[/path]
+	matches := h.patterns.copyInto.FindStringSubmatch(sql)
 	if len(matches) < 3 {
 		return nil, fmt.Errorf("invalid COPY INTO syntax: %s", sql)
 	}
@@ -115,22 +155,17 @@ func (h *CopyHandler) ParseCopyStatement(sql string) (*CopyStatement, error) {
 	}
 
 	// Parse FILE_FORMAT
-	ffRegex := regexp.MustCompile(`(?i)FILE_FORMAT\s*=\s*\(([^)]+)\)`)
-	if ffMatch := ffRegex.FindStringSubmatch(sql); len(ffMatch) > 1 {
+	if ffMatch := h.patterns.fileFormat.FindStringSubmatch(sql); len(ffMatch) > 1 {
 		h.parseFileFormatOptions(&stmt.FileFormat, ffMatch[1])
 	}
 
 	// Parse PATTERN
-	patternRegex := regexp.MustCompile(`(?i)PATTERN\s*=\s*'([^']+)'`)
-	if patternMatch := patternRegex.FindStringSubmatch(sql); len(patternMatch) > 1 {
-		stmt.Pattern = patternMatch[1]
+	if p := extractMatch(h.patterns.pattern, sql, ""); p != "" {
+		stmt.Pattern = p
 	}
 
 	// Parse ON_ERROR
-	onErrorRegex := regexp.MustCompile(`(?i)ON_ERROR\s*=\s*(\w+)`)
-	if onErrorMatch := onErrorRegex.FindStringSubmatch(sql); len(onErrorMatch) > 1 {
-		stmt.OnError = strings.ToUpper(onErrorMatch[1])
-	}
+	stmt.OnError = extractMatchUpper(h.patterns.onError, sql, "ABORT")
 
 	// Parse PURGE
 	if strings.Contains(strings.ToUpper(sql), "PURGE = TRUE") {
@@ -150,27 +185,23 @@ func (h *CopyHandler) parseFileFormatOptions(opts *FileFormatOptions, optStr str
 	optStr = strings.TrimSpace(optStr)
 
 	// TYPE
-	typeRegex := regexp.MustCompile(`(?i)TYPE\s*=\s*(\w+)`)
-	if match := typeRegex.FindStringSubmatch(optStr); len(match) > 1 {
-		opts.Type = strings.ToUpper(match[1])
+	if t := extractMatchUpper(h.patterns.formatType, optStr, ""); t != "" {
+		opts.Type = t
 	}
 
 	// FIELD_DELIMITER
-	fdRegex := regexp.MustCompile(`(?i)FIELD_DELIMITER\s*=\s*'([^']*)'`)
-	if match := fdRegex.FindStringSubmatch(optStr); len(match) > 1 {
-		opts.FieldDelimiter = match[1]
+	if fd := extractMatch(h.patterns.fieldDelimiter, optStr, ""); fd != "" {
+		opts.FieldDelimiter = fd
 	}
 
 	// RECORD_DELIMITER
-	rdRegex := regexp.MustCompile(`(?i)RECORD_DELIMITER\s*=\s*'([^']*)'`)
-	if match := rdRegex.FindStringSubmatch(optStr); len(match) > 1 {
-		opts.RecordDelimiter = match[1]
+	if rd := extractMatch(h.patterns.recordDelimiter, optStr, ""); rd != "" {
+		opts.RecordDelimiter = rd
 	}
 
 	// SKIP_HEADER
-	shRegex := regexp.MustCompile(`(?i)SKIP_HEADER\s*=\s*(\d+)`)
-	if match := shRegex.FindStringSubmatch(optStr); len(match) > 1 {
-		if val, err := strconv.Atoi(match[1]); err == nil {
+	if sh := extractMatch(h.patterns.skipHeader, optStr, ""); sh != "" {
+		if val, err := strconv.Atoi(sh); err == nil {
 			opts.SkipHeader = val
 		}
 	}

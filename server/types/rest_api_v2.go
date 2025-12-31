@@ -110,6 +110,32 @@ type SchemaResponse struct {
 // ListSchemasResponse represents a list of schemas.
 type ListSchemasResponse []SchemaResponse
 
+// TableRequest represents a request to create a table.
+type TableRequest struct {
+	Name    string      `json:"name"`
+	Columns []ColumnDef `json:"columns"`
+	Comment string      `json:"comment,omitempty"`
+}
+
+// ColumnDef represents a column definition for CREATE TABLE.
+type ColumnDef struct {
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	Nullable   bool    `json:"nullable,omitempty"`
+	Default    *string `json:"default,omitempty"`
+	PrimaryKey bool    `json:"primary_key,omitempty"`
+}
+
+// AlterDatabaseRequest represents ALTER DATABASE request.
+type AlterDatabaseRequest struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
+// AlterTableRequest represents ALTER TABLE request.
+type AlterTableRequest struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
 // TableResponse represents table information.
 type TableResponse struct {
 	Name      string `json:"name"`

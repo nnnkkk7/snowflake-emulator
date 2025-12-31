@@ -95,6 +95,7 @@ func main() {
 		r.Get("/databases", restAPIHandler.ListDatabases)
 		r.Post("/databases", restAPIHandler.CreateDatabase)
 		r.Get("/databases/{database}", restAPIHandler.GetDatabase)
+		r.Put("/databases/{database}", restAPIHandler.AlterDatabase)
 		r.Delete("/databases/{database}", restAPIHandler.DeleteDatabase)
 
 		// Schema endpoints
@@ -105,7 +106,9 @@ func main() {
 
 		// Table endpoints
 		r.Get("/databases/{database}/schemas/{schema}/tables", restAPIHandler.ListTables)
+		r.Post("/databases/{database}/schemas/{schema}/tables", restAPIHandler.CreateTable)
 		r.Get("/databases/{database}/schemas/{schema}/tables/{table}", restAPIHandler.GetTable)
+		r.Put("/databases/{database}/schemas/{schema}/tables/{table}", restAPIHandler.AlterTable)
 		r.Delete("/databases/{database}/schemas/{schema}/tables/{table}", restAPIHandler.DeleteTable)
 
 		// Warehouse endpoints
