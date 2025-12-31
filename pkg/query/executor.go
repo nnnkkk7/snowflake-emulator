@@ -15,6 +15,16 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
+// Binding validation regexes to prevent SQL injection
+var (
+	// Date format: YYYY-MM-DD
+	dateRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	// Time format: HH:MM:SS or HH:MM:SS.fraction
+	timeRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d+)?$`)
+	// Timestamp format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS with optional timezone
+	timestampRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$`)
+)
+
 // QueryBindingValue represents a parameter binding value for SQL queries.
 // This mirrors the REST API v2 binding format.
 // Named QueryBindingValue to avoid conflict with types.BindingValue in server/types.
@@ -235,13 +245,24 @@ func formatBindingValue(b *QueryBindingValue) (string, error) {
 		return "FALSE", nil
 
 	case "DATE":
-		// Validate and format as DATE
+		// Validate date format to prevent SQL injection
+		if !dateRegex.MatchString(b.Value) {
+			return "", fmt.Errorf("invalid DATE format: %s (expected YYYY-MM-DD)", b.Value)
+		}
 		return "DATE '" + b.Value + "'", nil
 
 	case "TIME":
+		// Validate time format to prevent SQL injection
+		if !timeRegex.MatchString(b.Value) {
+			return "", fmt.Errorf("invalid TIME format: %s (expected HH:MM:SS)", b.Value)
+		}
 		return "TIME '" + b.Value + "'", nil
 
 	case "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ":
+		// Validate timestamp format to prevent SQL injection
+		if !timestampRegex.MatchString(b.Value) {
+			return "", fmt.Errorf("invalid TIMESTAMP format: %s (expected YYYY-MM-DD HH:MM:SS)", b.Value)
+		}
 		return "TIMESTAMP '" + b.Value + "'", nil
 
 	case ValueNull:
@@ -252,6 +273,22 @@ func formatBindingValue(b *QueryBindingValue) (string, error) {
 		escaped := strings.ReplaceAll(b.Value, "'", "''")
 		return "'" + escaped + "'", nil
 	}
+}
+
+// ExecuteWithBindings executes a non-query SQL statement with parameter bindings.
+// Bindings are keyed by position (e.g., "1", "2", "3") and replace :1, :2, :3 placeholders.
+func (e *Executor) ExecuteWithBindings(ctx context.Context, sql string, bindings map[string]*QueryBindingValue) (*ExecResult, error) {
+	if len(bindings) == 0 {
+		return e.Execute(ctx, sql)
+	}
+
+	// Replace binding placeholders with actual values
+	boundSQL, err := e.applyBindings(sql, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("binding error: %w", err)
+	}
+
+	return e.Execute(ctx, boundSQL)
 }
 
 // Execute executes a non-query SQL statement (INSERT, UPDATE, DELETE, CREATE, DROP, etc.).

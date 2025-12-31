@@ -55,6 +55,7 @@ func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 		r.Get("/databases", restHandler.ListDatabases)
 		r.Post("/databases", restHandler.CreateDatabase)
 		r.Get("/databases/{database}", restHandler.GetDatabase)
+		r.Put("/databases/{database}", restHandler.AlterDatabase)
 		r.Delete("/databases/{database}", restHandler.DeleteDatabase)
 
 		r.Get("/databases/{database}/schemas", restHandler.ListSchemas)
@@ -63,7 +64,9 @@ func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 		r.Delete("/databases/{database}/schemas/{schema}", restHandler.DeleteSchema)
 
 		r.Get("/databases/{database}/schemas/{schema}/tables", restHandler.ListTables)
+		r.Post("/databases/{database}/schemas/{schema}/tables", restHandler.CreateTable)
 		r.Get("/databases/{database}/schemas/{schema}/tables/{table}", restHandler.GetTable)
+		r.Put("/databases/{database}/schemas/{schema}/tables/{table}", restHandler.AlterTable)
 		r.Delete("/databases/{database}/schemas/{schema}/tables/{table}", restHandler.DeleteTable)
 
 		// Warehouse endpoints
@@ -585,4 +588,470 @@ func TestRESTAPIV2_WarehouseManagement(t *testing.T) {
 			t.Errorf("Expected status 404 after deletion, got %d", resp.StatusCode)
 		}
 	})
+}
+
+// TestRESTAPIV2_SubmitStatement_DDL tests DDL execution via SubmitStatement.
+func TestRESTAPIV2_SubmitStatement_DDL(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	// First create database and schema for table creation
+	dbReq := types.DatabaseRequest{Name: "DDL_TEST_DB"}
+	body, _ := json.Marshal(dbReq)
+	resp, _ := http.Post(server.URL+"/api/v2/databases", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	schemaReq := types.SchemaRequest{Name: "DDL_TEST_SCHEMA"}
+	body, _ = json.Marshal(schemaReq)
+	resp, _ = http.Post(server.URL+"/api/v2/databases/DDL_TEST_DB/schemas", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Test CREATE TABLE via SubmitStatement
+	// Use {DATABASE}.{SCHEMA}_{TABLE} naming convention per CLAUDE.md
+	t.Run("CreateTableViaStatement", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "CREATE TABLE DDL_TEST_DB.DDL_TEST_SCHEMA_TEST_TABLE (id INTEGER, name VARCHAR(100))",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("CreateTableViaStatement: OK")
+	})
+
+	// Test DROP TABLE via SubmitStatement
+	t.Run("DropTableViaStatement", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "DROP TABLE DDL_TEST_DB.DDL_TEST_SCHEMA_TEST_TABLE",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("DropTableViaStatement: OK")
+	})
+}
+
+// TestRESTAPIV2_SubmitStatement_DML tests DML execution via SubmitStatement.
+func TestRESTAPIV2_SubmitStatement_DML(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	// Setup: Create database, schema, and table
+	dbReq := types.DatabaseRequest{Name: "DML_TEST_DB"}
+	body, _ := json.Marshal(dbReq)
+	resp, _ := http.Post(server.URL+"/api/v2/databases", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	schemaReq := types.SchemaRequest{Name: "DML_TEST_SCHEMA"}
+	body, _ = json.Marshal(schemaReq)
+	resp, _ = http.Post(server.URL+"/api/v2/databases/DML_TEST_DB/schemas", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Create table via statement using {DATABASE}.{SCHEMA}_{TABLE} naming convention
+	createReq := types.SubmitStatementRequest{
+		Statement: "CREATE TABLE DML_TEST_DB.DML_TEST_SCHEMA_USERS (id INTEGER, name VARCHAR(100))",
+	}
+	body, _ = json.Marshal(createReq)
+	resp, _ = http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Test INSERT via SubmitStatement
+	t.Run("InsertViaStatement", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "INSERT INTO DML_TEST_DB.DML_TEST_SCHEMA_USERS VALUES (1, 'Alice')",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("InsertViaStatement: OK")
+	})
+
+	// Test UPDATE via SubmitStatement
+	t.Run("UpdateViaStatement", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "UPDATE DML_TEST_DB.DML_TEST_SCHEMA_USERS SET name = 'Bob' WHERE id = 1",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("UpdateViaStatement: OK")
+	})
+
+	// Test DELETE via SubmitStatement
+	t.Run("DeleteViaStatement", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "DELETE FROM DML_TEST_DB.DML_TEST_SCHEMA_USERS WHERE id = 1",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("DeleteViaStatement: OK")
+	})
+}
+
+// TestRESTAPIV2_DeleteDatabase tests database deletion (name → ID lookup fix).
+func TestRESTAPIV2_DeleteDatabase(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	// Create database
+	dbReq := types.DatabaseRequest{Name: "DELETE_TEST_DB"}
+	body, _ := json.Marshal(dbReq)
+	resp, err := http.Post(server.URL+"/api/v2/databases", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify database exists
+	resp, err = http.Get(server.URL + "/api/v2/databases/DELETE_TEST_DB")
+	if err != nil {
+		t.Fatalf("Failed to get database: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200 for get, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Delete database by name (this tests the name → ID lookup fix)
+	req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v2/databases/DELETE_TEST_DB", nil)
+	client := &http.Client{}
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to delete database: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected status 204, got %d. Body: %s", resp.StatusCode, string(body))
+	}
+
+	// Verify database is deleted
+	resp, err = http.Get(server.URL + "/api/v2/databases/DELETE_TEST_DB")
+	if err != nil {
+		t.Fatalf("Failed to verify deletion: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("Expected status 404 after deletion, got %d", resp.StatusCode)
+	}
+
+	t.Log("DeleteDatabase: OK (name → ID lookup works)")
+}
+
+// TestRESTAPIV2_CreatedOnMilliseconds verifies createdOn is in milliseconds.
+func TestRESTAPIV2_CreatedOnMilliseconds(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	beforeMs := time.Now().UnixMilli()
+
+	// Submit a statement
+	reqBody := types.SubmitStatementRequest{
+		Statement: "SELECT 1 AS num",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Failed to submit statement: %v", err)
+	}
+	defer resp.Body.Close()
+
+	afterMs := time.Now().UnixMilli()
+
+	var stmtResp types.StatementResponse
+	if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Verify createdOn is in milliseconds range
+	// If it were in seconds, it would be ~1700000000 (10 digits)
+	// In milliseconds, it should be ~1700000000000 (13 digits)
+	if stmtResp.CreatedOn < beforeMs || stmtResp.CreatedOn > afterMs {
+		t.Errorf("createdOn %d is not in expected range [%d, %d] (should be milliseconds)", stmtResp.CreatedOn, beforeMs, afterMs)
+	}
+
+	// Additional check: ensure it's not in seconds (would be 1000x smaller)
+	if stmtResp.CreatedOn < 1000000000000 {
+		t.Errorf("createdOn %d appears to be in seconds, not milliseconds", stmtResp.CreatedOn)
+	}
+
+	t.Logf("CreatedOnMilliseconds: OK (createdOn=%d)", stmtResp.CreatedOn)
+}
+
+// TestRESTAPIV2_BindingValidation tests parameter binding validation.
+func TestRESTAPIV2_BindingValidation(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	// Snowflake uses :1, :2, etc. for positional parameters
+	t.Run("ValidDateBinding", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "SELECT :1 AS dt",
+			Bindings: map[string]*types.BindingValue{
+				"1": {Type: "DATE", Value: "2024-01-15"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		json.NewDecoder(resp.Body).Decode(&stmtResp)
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected success, got code %s: %s", stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("ValidDateBinding: OK")
+	})
+
+	t.Run("InvalidDateBinding", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "SELECT :1 AS dt",
+			Bindings: map[string]*types.BindingValue{
+				"1": {Type: "DATE", Value: "invalid-date"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Should return an error response (either 400 or 200 with error code)
+		var stmtResp types.StatementResponse
+		json.NewDecoder(resp.Body).Decode(&stmtResp)
+
+		// Binding validation errors should result in error code
+		if stmtResp.Code == types.ResponseCodeSuccess {
+			t.Errorf("Expected error code for invalid date, got success")
+		}
+
+		t.Logf("InvalidDateBinding: OK (rejected with code %s)", stmtResp.Code)
+	})
+
+	t.Run("ValidTimeBinding", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "SELECT :1 AS tm",
+			Bindings: map[string]*types.BindingValue{
+				"1": {Type: "TIME", Value: "14:30:00"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		json.NewDecoder(resp.Body).Decode(&stmtResp)
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected success, got code %s: %s", stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("ValidTimeBinding: OK")
+	})
+
+	t.Run("ValidTimestampBinding", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "SELECT :1 AS ts",
+			Bindings: map[string]*types.BindingValue{
+				"1": {Type: "TIMESTAMP", Value: "2024-01-15T14:30:00Z"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status 200, got %d. Body: %s", resp.StatusCode, string(body))
+		}
+
+		var stmtResp types.StatementResponse
+		json.NewDecoder(resp.Body).Decode(&stmtResp)
+
+		if stmtResp.Code != types.ResponseCodeSuccess {
+			t.Errorf("Expected success, got code %s: %s", stmtResp.Code, stmtResp.Message)
+		}
+
+		t.Log("ValidTimestampBinding: OK")
+	})
+
+	t.Run("SQLInjectionBlocked", func(t *testing.T) {
+		reqBody := types.SubmitStatementRequest{
+			Statement: "SELECT :1 AS dt",
+			Bindings: map[string]*types.BindingValue{
+				"1": {Type: "DATE", Value: "2024-01-15'; DROP TABLE users; --"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Should be rejected due to invalid format
+		var stmtResp types.StatementResponse
+		json.NewDecoder(resp.Body).Decode(&stmtResp)
+
+		// Binding validation errors should result in error code (not success)
+		if stmtResp.Code == types.ResponseCodeSuccess {
+			t.Errorf("Expected error code for SQL injection attempt, got success")
+		}
+
+		t.Logf("SQLInjectionBlocked: OK (injection attempt rejected with code %s)", stmtResp.Code)
+	})
+}
+
+// TestRESTAPIV2_StatementStatusURL verifies statementStatusUrl is present.
+func TestRESTAPIV2_StatementStatusURL(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	reqBody := types.SubmitStatementRequest{
+		Statement: "SELECT 1 AS num",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Failed to submit statement: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var stmtResp types.StatementResponse
+	if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if stmtResp.StatementStatusURL == "" {
+		t.Error("Expected statementStatusUrl to be set")
+	}
+
+	expectedPrefix := "/api/v2/statements/"
+	if len(stmtResp.StatementStatusURL) < len(expectedPrefix) {
+		t.Errorf("statementStatusUrl too short: %s", stmtResp.StatementStatusURL)
+	} else if stmtResp.StatementStatusURL[:len(expectedPrefix)] != expectedPrefix {
+		t.Errorf("Expected statementStatusUrl to start with %s, got %s", expectedPrefix, stmtResp.StatementStatusURL)
+	}
+
+	t.Logf("StatementStatusURL: OK (url=%s)", stmtResp.StatementStatusURL)
 }

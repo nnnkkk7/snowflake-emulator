@@ -61,14 +61,30 @@ func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 	// Execute the statement synchronously
 	ctx := r.Context()
 
+	// Classify the SQL statement to determine routing
+	classification := query.ClassifySQL(req.Statement)
+
 	// Convert bindings from types.BindingValue to query.QueryBindingValue
+	bindings := convertBindings(req.Bindings)
+
 	var result *query.Result
+	var execResult *query.ExecResult
 	var err error
-	if len(req.Bindings) > 0 {
-		bindings := convertBindings(req.Bindings)
-		result, err = h.executor.QueryWithBindings(ctx, req.Statement, bindings)
+
+	if classification.IsQuery {
+		// Handle SELECT, SHOW, DESCRIBE, EXPLAIN
+		if len(bindings) > 0 {
+			result, err = h.executor.QueryWithBindings(ctx, req.Statement, bindings)
+		} else {
+			result, err = h.executor.Query(ctx, req.Statement)
+		}
 	} else {
-		result, err = h.executor.Query(ctx, req.Statement)
+		// Handle DDL (CREATE, DROP, ALTER) and DML (INSERT, UPDATE, DELETE)
+		if len(bindings) > 0 {
+			execResult, err = h.executor.ExecuteWithBindings(ctx, req.Statement, bindings)
+		} else {
+			execResult, err = h.executor.Execute(ctx, req.Statement)
+		}
 	}
 
 	if err != nil {
@@ -76,11 +92,12 @@ func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 		h.stmtMgr.SetError(stmt.Handle, sfErr)
 
 		resp := types.StatementResponse{
-			StatementHandle: stmt.Handle,
-			Code:            apierror.CodeSQLExecutionError,
-			SQLState:        types.SQLState42000,
-			Message:         err.Error(),
-			CreatedOn:       stmt.CreatedOn.Unix(),
+			StatementHandle:    stmt.Handle,
+			Code:               apierror.CodeSQLExecutionError,
+			SQLState:           types.SQLState42000,
+			StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
+			Message:            err.Error(),
+			CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -88,11 +105,16 @@ func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Store result
-	h.stmtMgr.SetResult(stmt.Handle, result)
-
-	// Build response
-	resp := h.buildStatementResponse(stmt, result)
+	// Build response based on statement type
+	var resp types.StatementResponse
+	if classification.IsQuery {
+		// Store result for queries
+		h.stmtMgr.SetResult(stmt.Handle, result)
+		resp = h.buildStatementResponse(stmt, result)
+	} else {
+		// Build response for DDL/DML
+		resp = h.buildExecResponse(stmt, execResult)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -118,25 +140,27 @@ func (h *RestAPIv2Handler) GetStatement(w http.ResponseWriter, r *http.Request) 
 			Code:               types.ResponseCodeStatementPending,
 			SQLState:           types.SQLState00000,
 			StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
-			CreatedOn:          stmt.CreatedOn.Unix(),
+			CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		}
 	case query.StatementStatusSuccess:
 		resp = h.buildStatementResponse(stmt, stmt.Result)
 	case query.StatementStatusFailed:
 		resp = types.StatementResponse{
-			StatementHandle: stmt.Handle,
-			Code:            stmt.Error.Code,
-			SQLState:        types.SQLState42000,
-			Message:         stmt.Error.Message,
-			CreatedOn:       stmt.CreatedOn.Unix(),
+			StatementHandle:    stmt.Handle,
+			Code:               stmt.Error.Code,
+			SQLState:           types.SQLState42000,
+			StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
+			Message:            stmt.Error.Message,
+			CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		}
 	case query.StatementStatusCanceled:
 		resp = types.StatementResponse{
-			StatementHandle: stmt.Handle,
-			Code:            types.ResponseCodeStatementCanceled,
-			SQLState:        types.SQLState00000,
-			Message:         "Statement canceled",
-			CreatedOn:       stmt.CreatedOn.Unix(),
+			StatementHandle:    stmt.Handle,
+			Code:               types.ResponseCodeStatementCanceled,
+			SQLState:           types.SQLState00000,
+			StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
+			Message:            "Statement canceled",
+			CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		}
 	}
 
@@ -172,6 +196,29 @@ func (h *RestAPIv2Handler) CancelStatement(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// buildExecResponse builds a success response from a DDL/DML execution result.
+func (h *RestAPIv2Handler) buildExecResponse(stmt *query.Statement, execResult *query.ExecResult) types.StatementResponse {
+	// For DDL/DML, we return a minimal response with rows affected
+	return types.StatementResponse{
+		StatementHandle:    stmt.Handle,
+		Code:               types.ResponseCodeSuccess,
+		SQLState:           types.SQLState00000,
+		StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
+		CreatedOn:          stmt.CreatedOn.UnixMilli(),
+		ResultSetMetaData: &types.ResultSetMetaData{
+			NumRows: execResult.RowsAffected,
+			Format:  "jsonv2",
+			RowType: []types.RowTypeField{
+				{
+					Name: "number of rows affected",
+					Type: "FIXED",
+				},
+			},
+		},
+		Data: [][]interface{}{{execResult.RowsAffected}},
+	}
+}
+
 // buildStatementResponse builds a success response from a query result.
 func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result *query.Result) types.StatementResponse {
 	// Convert row type
@@ -192,10 +239,11 @@ func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result 
 	copy(data, result.Rows)
 
 	return types.StatementResponse{
-		StatementHandle: stmt.Handle,
-		Code:            types.ResponseCodeSuccess,
-		SQLState:        types.SQLState00000,
-		CreatedOn:       stmt.CreatedOn.Unix(),
+		StatementHandle:    stmt.Handle,
+		Code:               types.ResponseCodeSuccess,
+		SQLState:           types.SQLState00000,
+		StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
+		CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		ResultSetMetaData: &types.ResultSetMetaData{
 			NumRows: int64(len(result.Rows)),
 			Format:  "jsonv2",
@@ -306,8 +354,16 @@ func (h *RestAPIv2Handler) DeleteDatabase(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	dbName := chi.URLParam(r, "database")
 
-	if err := h.repo.DropDatabase(ctx, dbName); err != nil {
-		h.sendError(w, http.StatusNotFound, err.Error(), types.SQLState02000)
+	// First, look up the database by name to get its ID
+	db, err := h.repo.GetDatabaseByName(ctx, dbName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Database not found", types.SQLState02000)
+		return
+	}
+
+	// Now drop using the ID
+	if err := h.repo.DropDatabase(ctx, db.ID); err != nil {
+		h.sendError(w, http.StatusInternalServerError, err.Error(), types.SQLState42000)
 		return
 	}
 
@@ -558,6 +614,178 @@ func (h *RestAPIv2Handler) DeleteTable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AlterDatabase handles PUT /api/v2/databases/{database}.
+func (h *RestAPIv2Handler) AlterDatabase(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dbName := chi.URLParam(r, "database")
+
+	var req types.AlterDatabaseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
+		return
+	}
+
+	db, err := h.repo.GetDatabaseByName(ctx, dbName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Database not found", types.SQLState02000)
+		return
+	}
+
+	// Update comment if provided
+	if req.Comment != nil {
+		if err := h.repo.UpdateDatabaseComment(ctx, db.ID, *req.Comment); err != nil {
+			h.sendError(w, http.StatusInternalServerError, err.Error(), types.SQLState42000)
+			return
+		}
+	}
+
+	// Get updated database
+	db, err = h.repo.GetDatabase(ctx, db.ID)
+	if err != nil {
+		h.sendError(w, http.StatusInternalServerError, err.Error(), types.SQLState42000)
+		return
+	}
+
+	resp := types.DatabaseResponse{
+		Name:      db.Name,
+		Comment:   db.Comment,
+		Owner:     db.Owner,
+		CreatedOn: db.CreatedAt.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// CreateTable handles POST /api/v2/databases/{database}/schemas/{schema}/tables.
+func (h *RestAPIv2Handler) CreateTable(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dbName := chi.URLParam(r, "database")
+	schemaName := chi.URLParam(r, "schema")
+
+	var req types.TableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
+		return
+	}
+
+	if req.Name == "" {
+		h.sendError(w, http.StatusBadRequest, "Table name is required", types.SQLState42000)
+		return
+	}
+
+	if len(req.Columns) == 0 {
+		h.sendError(w, http.StatusBadRequest, "At least one column is required", types.SQLState42000)
+		return
+	}
+
+	db, err := h.repo.GetDatabaseByName(ctx, dbName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Database not found", types.SQLState02000)
+		return
+	}
+
+	schema, err := h.repo.GetSchemaByName(ctx, db.ID, schemaName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Schema not found", types.SQLState02000)
+		return
+	}
+
+	// Convert column definitions
+	columns := make([]metadata.ColumnDef, len(req.Columns))
+	for i, col := range req.Columns {
+		columns[i] = metadata.ColumnDef{
+			Name:       col.Name,
+			Type:       col.Type,
+			Nullable:   col.Nullable,
+			Default:    col.Default,
+			PrimaryKey: col.PrimaryKey,
+		}
+	}
+
+	table, err := h.repo.CreateTable(ctx, schema.ID, req.Name, columns, req.Comment)
+	if err != nil {
+		h.sendError(w, http.StatusBadRequest, err.Error(), types.SQLState42000)
+		return
+	}
+
+	resp := types.TableResponse{
+		Name:      table.Name,
+		Database:  dbName,
+		Schema:    schemaName,
+		TableType: table.TableType,
+		Comment:   table.Comment,
+		Owner:     table.Owner,
+		CreatedOn: table.CreatedAt.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// AlterTable handles PUT /api/v2/databases/{database}/schemas/{schema}/tables/{table}.
+func (h *RestAPIv2Handler) AlterTable(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dbName := chi.URLParam(r, "database")
+	schemaName := chi.URLParam(r, "schema")
+	tableName := chi.URLParam(r, "table")
+
+	var req types.AlterTableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, http.StatusBadRequest, "Invalid request body", types.SQLState42000)
+		return
+	}
+
+	db, err := h.repo.GetDatabaseByName(ctx, dbName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Database not found", types.SQLState02000)
+		return
+	}
+
+	schema, err := h.repo.GetSchemaByName(ctx, db.ID, schemaName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Schema not found", types.SQLState02000)
+		return
+	}
+
+	table, err := h.repo.GetTableByName(ctx, schema.ID, tableName)
+	if err != nil {
+		h.sendError(w, http.StatusNotFound, "Table not found", types.SQLState02000)
+		return
+	}
+
+	// Update comment if provided
+	if req.Comment != nil {
+		if err := h.repo.UpdateTableComment(ctx, table.ID, *req.Comment); err != nil {
+			h.sendError(w, http.StatusInternalServerError, err.Error(), types.SQLState42000)
+			return
+		}
+	}
+
+	// Get updated table
+	table, err = h.repo.GetTable(ctx, table.ID)
+	if err != nil {
+		h.sendError(w, http.StatusInternalServerError, err.Error(), types.SQLState42000)
+		return
+	}
+
+	resp := types.TableResponse{
+		Name:      table.Name,
+		Database:  dbName,
+		Schema:    schemaName,
+		TableType: table.TableType,
+		Comment:   table.Comment,
+		Owner:     table.Owner,
+		CreatedOn: table.CreatedAt.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // Warehouse Management Handlers
