@@ -63,17 +63,59 @@ Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckD
 
 ## Quick Start
 
-### Prerequisites
+### Platform Support
+
+| Platform | Docker | Binary |
+|----------|--------|--------|
+| Linux x86_64 (amd64) | ✅ | ✅ |
+| Linux ARM64 | ✅ | - |
+| macOS x86_64 | ✅ | - |
+| macOS ARM64 (Apple Silicon) | ✅ | - |
+| Windows (WSL2) | ✅ | - |
+
+> **Note**: Binary releases are only available for Linux x86_64. This is due to DuckDB requiring CGO, which makes cross-compilation complex. For all other platforms, Docker is recommended.
+
+### Installation
+
+#### Docker (Recommended)
+
+Docker is the recommended installation method for all platforms.
+
+```bash
+# Pull the image
+docker pull ghcr.io/nnnkkk7/snowflake-emulator:latest
+
+# Run with in-memory database
+docker run -p 8080:8080 ghcr.io/nnnkkk7/snowflake-emulator:latest
+
+# Run with persistent storage
+docker run -p 8080:8080 -v snowflake-data:/data \
+  -e DB_PATH=/data/snowflake.db \
+  ghcr.io/nnnkkk7/snowflake-emulator:latest
+```
+
+#### Docker Compose
+
+```bash
+# Clone the repository
+git clone https://github.com/nnnkkk7/snowflake-emulator.git
+cd snowflake-emulator
+
+# Start with Docker Compose
+docker compose up
+```
+
+#### Build from Source (Linux x86_64)
+
+Prerequisites:
 
 - Go 1.24+
 - GCC (for DuckDB CGO)
 
-### Installation
-
 ```bash
 git clone https://github.com/nnnkkk7/snowflake-emulator.git
 cd snowflake-emulator
-go build -o snowflake-emulator ./cmd/server
+CGO_ENABLED=1 go build -o snowflake-emulator ./cmd/server
 ```
 
 ### Run the Server
