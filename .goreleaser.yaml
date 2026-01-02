@@ -8,7 +8,8 @@ before:
     - go mod download
 
 # Build configuration
-# Note: DuckDB requires CGO, so we use native builds only (no cross-compilation)
+# Note: DuckDB requires CGO, cross-compilation is not supported
+# Only linux/amd64 binary is built; use Docker for other platforms
 builds:
   - id: snowflake-emulator
     main: ./cmd/server
@@ -18,24 +19,13 @@ builds:
     env:
       - CGO_ENABLED=1
 
-    # Only build for the runner's native platform
-    # Cross-compilation with CGO is complex and error-prone
+    # Only build for linux/amd64 (GitHub Actions runner native platform)
+    # For macOS and ARM64, use Docker images instead
     goos:
       - linux
-      - darwin
 
     goarch:
       - amd64
-      - arm64
-
-    # Skip cross-compilation combinations that require CGO cross-compilers
-    ignore:
-      # Cross-compilation requires special setup, so we skip non-native builds
-      # GitHub Actions runners will build native binaries for each platform
-      - goos: linux
-        goarch: arm64
-      - goos: darwin
-        goarch: amd64
 
     ldflags:
       - -s -w
@@ -93,14 +83,14 @@ release:
 
     ### Installation
 
-    **Docker (Recommended)**:
+    **Docker (Recommended for all platforms)**:
     ```bash
     docker pull ghcr.io/nnnkkk7/snowflake-emulator:{{ .Version }}
     docker run -p 8080:8080 ghcr.io/nnnkkk7/snowflake-emulator:{{ .Version }}
     ```
 
-    **Binary**:
-    Download the appropriate binary for your platform below.
+    **Binary (Linux x86_64 only)**:
+    Download the binary below. For macOS and ARM64, please use Docker.
 
   footer: |
     ---
