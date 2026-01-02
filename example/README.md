@@ -84,20 +84,6 @@ docker compose down
 - REST API communication with containerized emulator
 - Snowflake SQL functions (IFF, DATEADD, LISTAGG)
 
-## Snowflake SQL Functions Supported
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `IFF(cond, t, f)` | Conditional expression | `IFF(score >= 90, 'A', 'B')` |
-| `NVL(a, b)` | Null substitution | `NVL(email, 'none')` |
-| `NVL2(a, b, c)` | Null conditional | `NVL2(email, 'has', 'none')` |
-| `DATEADD(part, n, date)` | Add to date | `DATEADD(day, 30, hire_date)` |
-| `DATEDIFF(part, start, end)` | Date difference | `DATEDIFF(day, start, end)` |
-| `LISTAGG(col, sep)` | String aggregation | `LISTAGG(name, ', ')` |
-| `IFNULL(a, b)` | Null substitution | `IFNULL(value, 0)` |
-| `TO_VARIANT(x)` | Convert to JSON | `TO_VARIANT(data)` |
-| `PARSE_JSON(str)` | Parse JSON string | `PARSE_JSON('{"a":1}')` |
-
 ## Configuration
 
 ### Environment Variables
