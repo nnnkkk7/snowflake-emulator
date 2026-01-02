@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/snowflake-emulator.png" alt="snowflake-emulator" />
+  <img src="assets/snowflake-emulator.png" alt="snowflake-emulator" width="360" />
 </p>
 
 # Snowflake Emulator
