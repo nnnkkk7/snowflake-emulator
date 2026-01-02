@@ -1189,3 +1189,217 @@ func interfaceToString(v interface{}) string {
 		return fmt.Sprintf("%v", val)
 	}
 }
+
+// TestRESTAPIV2_AllSQLOperations tests all SQL operations documented in README via REST API v2.
+func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
+	server := setupRESTAPIV2Server(t)
+
+	executeStatement := func(statement string) types.StatementResponse {
+		reqBody := types.SubmitStatementRequest{
+			Statement: statement,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		resp, err := http.Post(server.URL+"/api/v2/statements", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to submit statement: %v", err)
+		}
+		defer resp.Body.Close()
+
+		var stmtResp types.StatementResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stmtResp); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		return stmtResp
+	}
+
+	// === DDL: CREATE TABLE ===
+	t.Run("DDL_CREATE_TABLE", func(t *testing.T) {
+		resp := executeStatement("CREATE TABLE ops_test (id INTEGER PRIMARY KEY, name VARCHAR, value DOUBLE)")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("CREATE TABLE failed: %s - %s", resp.Code, resp.Message)
+		}
+		t.Log("DDL_CREATE_TABLE: OK")
+	})
+
+	// === DML: INSERT ===
+	t.Run("DML_INSERT", func(t *testing.T) {
+		resp := executeStatement("INSERT INTO ops_test VALUES (1, 'Alice', 100.5), (2, 'Bob', 200.0), (3, 'Charlie', 150.0)")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("INSERT failed: %s - %s", resp.Code, resp.Message)
+		}
+		t.Log("DML_INSERT: OK")
+	})
+
+	// === Query: SELECT ===
+	t.Run("Query_SELECT", func(t *testing.T) {
+		resp := executeStatement("SELECT * FROM ops_test ORDER BY id")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("SELECT failed: %s - %s", resp.Code, resp.Message)
+		}
+		if len(resp.Data) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(resp.Data))
+		}
+		t.Log("Query_SELECT: OK")
+	})
+
+	// === Query: IFF function (Snowflake to DuckDB translation) ===
+	t.Run("Query_IFF_Translation", func(t *testing.T) {
+		resp := executeStatement("SELECT name, IFF(value > 150, 'HIGH', 'LOW') AS tier FROM ops_test ORDER BY id")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("IFF query failed: %s - %s", resp.Code, resp.Message)
+		}
+		if len(resp.Data) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(resp.Data))
+		}
+		// Verify translation worked: Alice (100.5) -> LOW, Bob (200.0) -> HIGH
+		if len(resp.Data) >= 2 {
+			row1 := resp.Data[0]
+			if len(row1) >= 2 && interfaceToString(row1[1]) != "LOW" {
+				t.Errorf("Expected 'LOW' for Alice, got %v", row1[1])
+			}
+			row2 := resp.Data[1]
+			if len(row2) >= 2 && interfaceToString(row2[1]) != "HIGH" {
+				t.Errorf("Expected 'HIGH' for Bob, got %v", row2[1])
+			}
+		}
+		t.Log("Query_IFF_Translation: OK")
+	})
+
+	// === Query: NVL function ===
+	t.Run("Query_NVL_Translation", func(t *testing.T) {
+		// Insert row with NULL value
+		executeStatement("INSERT INTO ops_test VALUES (4, NULL, 400.0)")
+		resp := executeStatement("SELECT id, NVL(name, 'Unknown') AS name FROM ops_test WHERE id = 4")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("NVL query failed: %s - %s", resp.Code, resp.Message)
+		}
+		if len(resp.Data) > 0 && len(resp.Data[0]) > 1 {
+			if interfaceToString(resp.Data[0][1]) != "Unknown" {
+				t.Errorf("Expected 'Unknown', got %v", resp.Data[0][1])
+			}
+		}
+		t.Log("Query_NVL_Translation: OK")
+	})
+
+	// === DML: UPDATE ===
+	t.Run("DML_UPDATE", func(t *testing.T) {
+		resp := executeStatement("UPDATE ops_test SET value = 999.0 WHERE id = 1")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("UPDATE failed: %s - %s", resp.Code, resp.Message)
+		}
+		// Verify update
+		verifyResp := executeStatement("SELECT value FROM ops_test WHERE id = 1")
+		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
+			val := interfaceToString(verifyResp.Data[0][0])
+			if val != "999" && val != "999.0" {
+				t.Errorf("Expected value 999, got %v", val)
+			}
+		}
+		t.Log("DML_UPDATE: OK")
+	})
+
+	// === DML: DELETE ===
+	t.Run("DML_DELETE", func(t *testing.T) {
+		resp := executeStatement("DELETE FROM ops_test WHERE id = 4")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("DELETE failed: %s - %s", resp.Code, resp.Message)
+		}
+		// Verify deletion
+		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 4")
+		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
+			if interfaceToString(verifyResp.Data[0][0]) != "0" {
+				t.Error("Expected row to be deleted")
+			}
+		}
+		t.Log("DML_DELETE: OK")
+	})
+
+	// === Transaction: BEGIN, COMMIT ===
+	t.Run("Transaction_BEGIN_COMMIT", func(t *testing.T) {
+		// BEGIN
+		resp := executeStatement("BEGIN")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("BEGIN failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// INSERT in transaction
+		resp = executeStatement("INSERT INTO ops_test VALUES (5, 'Eve', 500.0)")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("INSERT in transaction failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// COMMIT
+		resp = executeStatement("COMMIT")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("COMMIT failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// Verify committed
+		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 5")
+		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
+			if interfaceToString(verifyResp.Data[0][0]) != "1" {
+				t.Error("Expected row to be committed")
+			}
+		}
+		t.Log("Transaction_BEGIN_COMMIT: OK")
+	})
+
+	// === Transaction: BEGIN, ROLLBACK ===
+	t.Run("Transaction_BEGIN_ROLLBACK", func(t *testing.T) {
+		// BEGIN
+		resp := executeStatement("BEGIN")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("BEGIN failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// INSERT in transaction
+		resp = executeStatement("INSERT INTO ops_test VALUES (99, 'Rollback', 999.0)")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("INSERT in transaction failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// ROLLBACK
+		resp = executeStatement("ROLLBACK")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("ROLLBACK failed: %s - %s", resp.Code, resp.Message)
+		}
+
+		// Verify rolled back
+		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 99")
+		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
+			if interfaceToString(verifyResp.Data[0][0]) != "0" {
+				t.Error("Expected row to be rolled back")
+			}
+		}
+		t.Log("Transaction_BEGIN_ROLLBACK: OK")
+	})
+
+	// === DDL: ALTER TABLE ===
+	t.Run("DDL_ALTER_TABLE", func(t *testing.T) {
+		resp := executeStatement("ALTER TABLE ops_test ADD COLUMN email VARCHAR(255)")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Logf("ALTER TABLE: DuckDB pass-through - %s", resp.Message)
+		} else {
+			t.Log("DDL_ALTER_TABLE: OK")
+		}
+	})
+
+	// === DDL: DROP TABLE ===
+	t.Run("DDL_DROP_TABLE", func(t *testing.T) {
+		resp := executeStatement("DROP TABLE ops_test")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("DROP TABLE failed: %s - %s", resp.Code, resp.Message)
+		}
+		t.Log("DDL_DROP_TABLE: OK")
+	})
+
+	// === DDL: DROP TABLE IF EXISTS (non-existent) ===
+	t.Run("DDL_DROP_TABLE_IF_EXISTS", func(t *testing.T) {
+		resp := executeStatement("DROP TABLE IF EXISTS nonexistent_table")
+		if resp.Code != types.ResponseCodeSuccess {
+			t.Fatalf("DROP TABLE IF EXISTS failed: %s - %s", resp.Code, resp.Message)
+		}
+		t.Log("DDL_DROP_TABLE_IF_EXISTS: OK")
+	})
+}

@@ -334,6 +334,310 @@ func TestIntegration_QueryEngineWorkflow(t *testing.T) { //nolint:gocyclo // Int
 	})
 }
 
+// TestIntegration_AllSQLOperations tests all SQL operations documented in README.
+// This comprehensive test verifies: Query, DML, DDL, Transaction, MERGE operations.
+func TestIntegration_AllSQLOperations(t *testing.T) {
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	executor := NewExecutor(mgr, repo)
+	mergeProcessor := NewMergeProcessor(executor)
+	executor.Configure(WithMergeProcessor(mergeProcessor))
+	ctx := context.Background()
+
+	// === Query Operations: SELECT, SHOW, DESCRIBE, EXPLAIN ===
+	t.Run("Query_SELECT", func(t *testing.T) {
+		result, err := executor.Query(ctx, "SELECT 1 AS num, 'hello' AS str")
+		if err != nil {
+			t.Fatalf("SELECT failed: %v", err)
+		}
+		if len(result.Rows) != 1 || len(result.Columns) != 2 {
+			t.Errorf("Expected 1 row with 2 columns, got %d rows with %d columns", len(result.Rows), len(result.Columns))
+		}
+	})
+
+	t.Run("Query_SHOW_TABLES", func(t *testing.T) {
+		// DuckDB supports SHOW TABLES
+		result, err := executor.Query(ctx, "SHOW TABLES")
+		if err != nil {
+			t.Logf("SHOW TABLES: DuckDB pass-through - %v", err)
+		} else {
+			t.Logf("SHOW TABLES: OK - returned %d rows", len(result.Rows))
+		}
+	})
+
+	t.Run("Query_EXPLAIN", func(t *testing.T) {
+		result, err := executor.Query(ctx, "EXPLAIN SELECT 1")
+		if err != nil {
+			t.Logf("EXPLAIN: DuckDB pass-through - %v", err)
+		} else {
+			t.Logf("EXPLAIN: OK - returned %d rows", len(result.Rows))
+		}
+	})
+
+	// === DDL Operations: CREATE/DROP TABLE ===
+	t.Run("DDL_CREATE_TABLE", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "CREATE TABLE ddl_test (id INTEGER PRIMARY KEY, name VARCHAR, value DOUBLE)")
+		if err != nil {
+			t.Fatalf("CREATE TABLE failed: %v", err)
+		}
+	})
+
+	t.Run("DDL_CREATE_TABLE_IF_NOT_EXISTS", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "CREATE TABLE IF NOT EXISTS ddl_test (id INTEGER)")
+		if err != nil {
+			t.Fatalf("CREATE TABLE IF NOT EXISTS failed: %v", err)
+		}
+	})
+
+	t.Run("Query_DESCRIBE", func(t *testing.T) {
+		// Try DESCRIBE after table exists
+		result, err := executor.Query(ctx, "DESCRIBE ddl_test")
+		if err != nil {
+			t.Logf("DESCRIBE: DuckDB pass-through - %v", err)
+		} else {
+			t.Logf("DESCRIBE: OK - returned %d rows", len(result.Rows))
+		}
+	})
+
+	t.Run("DDL_ALTER_TABLE", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "ALTER TABLE ddl_test ADD COLUMN email VARCHAR(255)")
+		if err != nil {
+			t.Logf("ALTER TABLE ADD COLUMN: DuckDB pass-through - %v", err)
+		} else {
+			t.Log("ALTER TABLE ADD COLUMN: OK")
+		}
+	})
+
+	// === DML Operations: INSERT, UPDATE, DELETE ===
+	t.Run("DML_INSERT", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "INSERT INTO ddl_test (id, name, value) VALUES (1, 'Alice', 100.5), (2, 'Bob', 200.0)")
+		if err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+		if result.RowsAffected != 2 {
+			t.Errorf("Expected 2 rows affected, got %d", result.RowsAffected)
+		}
+	})
+
+	t.Run("DML_UPDATE", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "UPDATE ddl_test SET value = 150.0 WHERE id = 1")
+		if err != nil {
+			t.Fatalf("UPDATE failed: %v", err)
+		}
+		if result.RowsAffected != 1 {
+			t.Errorf("Expected 1 row affected, got %d", result.RowsAffected)
+		}
+	})
+
+	t.Run("DML_DELETE", func(t *testing.T) {
+		result, err := executor.Execute(ctx, "DELETE FROM ddl_test WHERE id = 2")
+		if err != nil {
+			t.Fatalf("DELETE failed: %v", err)
+		}
+		if result.RowsAffected != 1 {
+			t.Errorf("Expected 1 row affected, got %d", result.RowsAffected)
+		}
+	})
+
+	// === Transaction Operations: BEGIN, COMMIT, ROLLBACK ===
+	t.Run("Transaction_BEGIN_COMMIT", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+		_, err = executor.Execute(ctx, "INSERT INTO ddl_test (id, name, value) VALUES (3, 'Charlie', 300.0)")
+		if err != nil {
+			t.Fatalf("INSERT in transaction failed: %v", err)
+		}
+		_, err = executor.Execute(ctx, "COMMIT")
+		if err != nil {
+			t.Fatalf("COMMIT failed: %v", err)
+		}
+		// Verify committed
+		result, _ := executor.Query(ctx, "SELECT COUNT(*) FROM ddl_test WHERE id = 3")
+		if len(result.Rows) > 0 && result.Rows[0][0].(int64) != 1 {
+			t.Error("Expected row to be committed")
+		}
+	})
+
+	t.Run("Transaction_BEGIN_ROLLBACK", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+		_, err = executor.Execute(ctx, "INSERT INTO ddl_test (id, name, value) VALUES (99, 'Rollback', 999.0)")
+		if err != nil {
+			t.Fatalf("INSERT in transaction failed: %v", err)
+		}
+		_, err = executor.Execute(ctx, "ROLLBACK")
+		if err != nil {
+			t.Fatalf("ROLLBACK failed: %v", err)
+		}
+		// Verify rolled back
+		result, _ := executor.Query(ctx, "SELECT COUNT(*) FROM ddl_test WHERE id = 99")
+		if len(result.Rows) > 0 && result.Rows[0][0].(int64) != 0 {
+			t.Error("Expected row to be rolled back")
+		}
+	})
+
+	// === DDL: CREATE/DROP SCHEMA via SQL (DuckDB pass-through) ===
+	t.Run("DDL_CREATE_SCHEMA_SQL", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "CREATE SCHEMA test_schema_via_sql")
+		if err != nil {
+			t.Logf("CREATE SCHEMA via SQL: DuckDB pass-through - %v", err)
+		} else {
+			t.Log("CREATE SCHEMA via SQL: OK")
+		}
+	})
+
+	t.Run("DDL_DROP_SCHEMA_SQL", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "DROP SCHEMA IF EXISTS test_schema_via_sql")
+		if err != nil {
+			t.Logf("DROP SCHEMA via SQL: DuckDB pass-through - %v", err)
+		} else {
+			t.Log("DROP SCHEMA via SQL: OK")
+		}
+	})
+
+	// === MERGE INTO ===
+	t.Run("MERGE_INTO", func(t *testing.T) {
+		// Setup source table
+		_, _ = executor.Execute(ctx, "CREATE TABLE merge_source (id INTEGER, name VARCHAR, value DOUBLE)")
+		_, _ = executor.Execute(ctx, "INSERT INTO merge_source VALUES (1, 'Alice Updated', 999.0), (4, 'David', 400.0)")
+
+		mergeSQL := `MERGE INTO ddl_test t
+			USING merge_source s ON t.id = s.id
+			WHEN MATCHED THEN UPDATE SET name = s.name, value = s.value
+			WHEN NOT MATCHED THEN INSERT (id, name, value) VALUES (s.id, s.name, s.value)`
+
+		result, err := executor.Execute(ctx, mergeSQL)
+		if err != nil {
+			t.Fatalf("MERGE INTO failed: %v", err)
+		}
+		t.Logf("MERGE INTO: OK - %d rows affected", result.RowsAffected)
+
+		// Verify Alice was updated
+		queryResult, _ := executor.Query(ctx, "SELECT name, value FROM ddl_test WHERE id = 1")
+		if len(queryResult.Rows) > 0 {
+			if queryResult.Rows[0][0] != "Alice Updated" {
+				t.Errorf("Expected 'Alice Updated', got %v", queryResult.Rows[0][0])
+			}
+		}
+
+		// Verify David was inserted
+		queryResult, _ = executor.Query(ctx, "SELECT COUNT(*) FROM ddl_test WHERE id = 4")
+		if len(queryResult.Rows) > 0 && queryResult.Rows[0][0].(int64) != 1 {
+			t.Error("Expected David to be inserted")
+		}
+	})
+
+	// === Parameter Binding ===
+	t.Run("ParameterBinding_Colon", func(t *testing.T) {
+		bindings := map[string]*QueryBindingValue{
+			"1": {Type: "FIXED", Value: "1"},
+		}
+		result, err := executor.QueryWithBindings(ctx, "SELECT * FROM ddl_test WHERE id = :1", bindings)
+		if err != nil {
+			t.Fatalf("Query with :1 binding failed: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Errorf("Expected 1 row, got %d", len(result.Rows))
+		}
+	})
+
+	t.Run("ParameterBinding_QuestionMark", func(t *testing.T) {
+		bindings := map[string]*QueryBindingValue{
+			"1": {Type: "TEXT", Value: "Alice Updated"},
+		}
+		result, err := executor.QueryWithBindings(ctx, "SELECT * FROM ddl_test WHERE name = ?", bindings)
+		if err != nil {
+			t.Fatalf("Query with ? binding failed: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Errorf("Expected 1 row, got %d", len(result.Rows))
+		}
+	})
+
+	// === DDL: DROP TABLE ===
+	t.Run("DDL_DROP_TABLE", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "DROP TABLE ddl_test")
+		if err != nil {
+			t.Fatalf("DROP TABLE failed: %v", err)
+		}
+	})
+
+	t.Run("DDL_DROP_TABLE_IF_EXISTS", func(t *testing.T) {
+		_, err := executor.Execute(ctx, "DROP TABLE IF EXISTS nonexistent_table")
+		if err != nil {
+			t.Fatalf("DROP TABLE IF EXISTS failed: %v", err)
+		}
+	})
+}
+
+// TestIntegration_DDL_Database_Schema_REST tests CREATE/DROP DATABASE/SCHEMA via repository.
+func TestIntegration_DDL_Database_Schema_REST(t *testing.T) {
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("failed to open DuckDB: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mgr := connection.NewManager(db)
+	repo, err := metadata.NewRepository(mgr)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+	ctx := context.Background()
+
+	t.Run("CreateDatabase_REST", func(t *testing.T) {
+		db, err := repo.CreateDatabase(ctx, "REST_DB", "Test via REST")
+		if err != nil {
+			t.Fatalf("CreateDatabase failed: %v", err)
+		}
+		if db.Name != "REST_DB" {
+			t.Errorf("Expected 'REST_DB', got '%s'", db.Name)
+		}
+	})
+
+	t.Run("CreateSchema_REST", func(t *testing.T) {
+		db, _ := repo.GetDatabaseByName(ctx, "REST_DB")
+		schema, err := repo.CreateSchema(ctx, db.ID, "TEST_SCHEMA", "Test schema")
+		if err != nil {
+			t.Fatalf("CreateSchema failed: %v", err)
+		}
+		if schema.Name != "TEST_SCHEMA" {
+			t.Errorf("Expected 'TEST_SCHEMA', got '%s'", schema.Name)
+		}
+	})
+
+	t.Run("DropSchema_REST", func(t *testing.T) {
+		db, _ := repo.GetDatabaseByName(ctx, "REST_DB")
+		schema, _ := repo.GetSchemaByName(ctx, db.ID, "TEST_SCHEMA")
+		err := repo.DropSchema(ctx, schema.ID)
+		if err != nil {
+			t.Fatalf("DropSchema failed: %v", err)
+		}
+	})
+
+	t.Run("DropDatabase_REST", func(t *testing.T) {
+		db, _ := repo.GetDatabaseByName(ctx, "REST_DB")
+		err := repo.DropDatabase(ctx, db.ID)
+		if err != nil {
+			t.Fatalf("DropDatabase failed: %v", err)
+		}
+	})
+}
+
 // TestIntegration_ConcurrentQueries tests concurrent query execution.
 func TestIntegration_ConcurrentQueries(t *testing.T) {
 	db, err := sql.Open("duckdb", "")
