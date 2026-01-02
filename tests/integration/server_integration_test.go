@@ -1009,3 +1009,224 @@ func TestIntegration_MergeStatement(t *testing.T) {
 
 	t.Log("MERGE statement executed successfully")
 }
+
+// TestIntegration_AllSQLOperations_Protocol tests all SQL operations documented in README via gosnowflake protocol.
+func TestIntegration_AllSQLOperations_Protocol(t *testing.T) {
+	server, _, _ := setupTestServer(t)
+
+	// Login
+	loginReq := map[string]interface{}{
+		"data": map[string]string{
+			"LOGIN_NAME":   "testuser",
+			"PASSWORD":     "testpass",
+			"databaseName": "TEST_DB",
+			"schemaName":   "PUBLIC",
+		},
+	}
+
+	body, _ := json.Marshal(loginReq)
+	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
+	defer func() { _ = resp.Body.Close() }()
+
+	var loginResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+	data := loginResp["data"].(map[string]interface{})
+	token := data["token"].(string)
+
+	executeSQL := func(sqlText string) (map[string]interface{}, error) {
+		req := map[string]string{"sqlText": sqlText}
+		body, _ := json.Marshal(req)
+		httpReq, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Snowflake Token=\""+token+"\"")
+
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result, nil
+	}
+
+	// === DDL Operations: CREATE TABLE ===
+	t.Run("DDL_CREATE_TABLE", func(t *testing.T) {
+		result, err := executeSQL("CREATE TABLE TEST_DB.PUBLIC_OPS_TEST (id INTEGER PRIMARY KEY, name VARCHAR, value DOUBLE)")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("CREATE TABLE failed: %v", result["message"])
+		}
+		t.Log("DDL_CREATE_TABLE: OK")
+	})
+
+	// === DML Operations: INSERT ===
+	t.Run("DML_INSERT", func(t *testing.T) {
+		result, err := executeSQL("INSERT INTO TEST_DB.PUBLIC_OPS_TEST VALUES (1, 'Alice', 100.5), (2, 'Bob', 200.0)")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("INSERT failed: %v", result["message"])
+		}
+		t.Log("DML_INSERT: OK")
+	})
+
+	// === Query Operations: SELECT ===
+	t.Run("Query_SELECT", func(t *testing.T) {
+		result, err := executeSQL("SELECT * FROM TEST_DB.PUBLIC_OPS_TEST ORDER BY id")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("SELECT failed: %v", result["message"])
+		}
+		data := result["data"].(map[string]interface{})
+		rowset := data["rowset"].([]interface{})
+		if len(rowset) != 2 {
+			t.Errorf("Expected 2 rows, got %d", len(rowset))
+		}
+		t.Log("Query_SELECT: OK")
+	})
+
+	// === Query Operations: IFF function (Snowflake to DuckDB translation) ===
+	t.Run("Query_IFF_Translation", func(t *testing.T) {
+		result, err := executeSQL("SELECT name, IFF(value > 150, 'HIGH', 'LOW') AS tier FROM TEST_DB.PUBLIC_OPS_TEST ORDER BY id")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("IFF query failed: %v", result["message"])
+		}
+		data := result["data"].(map[string]interface{})
+		rowset := data["rowset"].([]interface{})
+		row1 := rowset[0].([]interface{})
+		if row1[1] != "LOW" {
+			t.Errorf("Expected 'LOW' for Alice, got %v", row1[1])
+		}
+		row2 := rowset[1].([]interface{})
+		if row2[1] != "HIGH" {
+			t.Errorf("Expected 'HIGH' for Bob, got %v", row2[1])
+		}
+		t.Log("Query_IFF_Translation: OK")
+	})
+
+	// === DML Operations: UPDATE ===
+	t.Run("DML_UPDATE", func(t *testing.T) {
+		result, err := executeSQL("UPDATE TEST_DB.PUBLIC_OPS_TEST SET value = 999.0 WHERE id = 1")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("UPDATE failed: %v", result["message"])
+		}
+		t.Log("DML_UPDATE: OK")
+	})
+
+	// === DML Operations: DELETE ===
+	t.Run("DML_DELETE", func(t *testing.T) {
+		result, err := executeSQL("DELETE FROM TEST_DB.PUBLIC_OPS_TEST WHERE id = 2")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("DELETE failed: %v", result["message"])
+		}
+		t.Log("DML_DELETE: OK")
+	})
+
+	// === Transaction Operations: BEGIN, COMMIT ===
+	t.Run("Transaction_BEGIN_COMMIT", func(t *testing.T) {
+		// BEGIN
+		result, err := executeSQL("BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("BEGIN failed: %v", result["message"])
+		}
+
+		// INSERT in transaction
+		result, err = executeSQL("INSERT INTO TEST_DB.PUBLIC_OPS_TEST VALUES (3, 'Charlie', 300.0)")
+		if err != nil {
+			t.Fatalf("INSERT request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("INSERT in transaction failed: %v", result["message"])
+		}
+
+		// COMMIT
+		result, err = executeSQL("COMMIT")
+		if err != nil {
+			t.Fatalf("COMMIT request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("COMMIT failed: %v", result["message"])
+		}
+
+		// Verify committed
+		result, _ = executeSQL("SELECT COUNT(*) FROM TEST_DB.PUBLIC_OPS_TEST WHERE id = 3")
+		data := result["data"].(map[string]interface{})
+		rowset := data["rowset"].([]interface{})
+		row := rowset[0].([]interface{})
+		if row[0] != "1" {
+			t.Error("Expected row to be committed")
+		}
+		t.Log("Transaction_BEGIN_COMMIT: OK")
+	})
+
+	// === Transaction Operations: BEGIN, ROLLBACK ===
+	t.Run("Transaction_BEGIN_ROLLBACK", func(t *testing.T) {
+		// BEGIN
+		result, err := executeSQL("BEGIN")
+		if err != nil {
+			t.Fatalf("BEGIN request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("BEGIN failed: %v", result["message"])
+		}
+
+		// INSERT in transaction
+		result, err = executeSQL("INSERT INTO TEST_DB.PUBLIC_OPS_TEST VALUES (99, 'Rollback', 999.0)")
+		if err != nil {
+			t.Fatalf("INSERT request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("INSERT in transaction failed: %v", result["message"])
+		}
+
+		// ROLLBACK
+		result, err = executeSQL("ROLLBACK")
+		if err != nil {
+			t.Fatalf("ROLLBACK request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("ROLLBACK failed: %v", result["message"])
+		}
+
+		// Verify rolled back
+		result, _ = executeSQL("SELECT COUNT(*) FROM TEST_DB.PUBLIC_OPS_TEST WHERE id = 99")
+		data := result["data"].(map[string]interface{})
+		rowset := data["rowset"].([]interface{})
+		row := rowset[0].([]interface{})
+		if row[0] != "0" {
+			t.Error("Expected row to be rolled back")
+		}
+		t.Log("Transaction_BEGIN_ROLLBACK: OK")
+	})
+
+	// === DDL Operations: DROP TABLE ===
+	t.Run("DDL_DROP_TABLE", func(t *testing.T) {
+		result, err := executeSQL("DROP TABLE TEST_DB.PUBLIC_OPS_TEST")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("DROP TABLE failed: %v", result["message"])
+		}
+		t.Log("DDL_DROP_TABLE: OK")
+	})
+}

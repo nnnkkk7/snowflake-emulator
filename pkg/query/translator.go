@@ -104,11 +104,16 @@ func (t *Translator) Translate(sql string) (string, error) {
 
 	// Skip AST transformation for DDL statements - they don't need function translation
 	// and the sqlparser adds unwanted backticks when serializing back to string
+	// Also skip SHOW/DESCRIBE/EXPLAIN which cause vitess-sqlparser to panic
 	upperSQL := strings.ToUpper(sql)
 	if strings.HasPrefix(upperSQL, "CREATE ") ||
 		strings.HasPrefix(upperSQL, "DROP ") ||
 		strings.HasPrefix(upperSQL, "ALTER ") ||
-		strings.HasPrefix(upperSQL, "TRUNCATE ") {
+		strings.HasPrefix(upperSQL, "TRUNCATE ") ||
+		strings.HasPrefix(upperSQL, "SHOW ") ||
+		strings.HasPrefix(upperSQL, "DESCRIBE ") ||
+		strings.HasPrefix(upperSQL, "DESC ") ||
+		strings.HasPrefix(upperSQL, "EXPLAIN ") {
 		return sql, nil
 	}
 

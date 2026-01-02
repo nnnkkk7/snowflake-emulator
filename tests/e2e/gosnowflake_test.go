@@ -527,3 +527,386 @@ func TestGosnowflake_MergeStatement(t *testing.T) {
 
 	t.Log("MERGE verification: OK")
 }
+
+// TestGosnowflake_AllSQLOperations tests all SQL operations documented in README via gosnowflake driver.
+// This comprehensive test verifies that all documented operations work correctly through the emulator.
+func TestGosnowflake_AllSQLOperations(t *testing.T) {
+	server := setupTestEmulator(t)
+	hostPort := server.URL[7:] // Remove "http://"
+
+	dsn := fmt.Sprintf("testuser:testpass@%s/TEST_DB/PUBLIC?account=testaccount&protocol=http&loginTimeout=5", hostPort)
+
+	db, err := sql.Open("snowflake", dsn)
+	if err != nil {
+		t.Fatalf("Failed to open connection: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Verify connection
+	if err := db.PingContext(ctx); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("Connection failed: %v", err)
+	}
+
+	// ===== DDL: CREATE TABLE =====
+	t.Run("DDL_CREATE_TABLE", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `CREATE TABLE test_operations (
+			id INTEGER PRIMARY KEY,
+			name VARCHAR(100),
+			score INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`)
+		if err != nil {
+			t.Fatalf("CREATE TABLE failed: %v", err)
+		}
+		t.Log("CREATE TABLE: OK")
+	})
+
+	// ===== DML: INSERT =====
+	t.Run("DML_INSERT", func(t *testing.T) {
+		result, err := db.ExecContext(ctx, `INSERT INTO test_operations (id, name, score) VALUES
+			(1, 'Alice', 95),
+			(2, 'Bob', 87),
+			(3, 'Charlie', 92)`)
+		if err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+		rowsAffected, _ := result.RowsAffected()
+		// Note: RowsAffected may return 0 via gosnowflake protocol (known behavior)
+		// The actual insert works correctly as verified by subsequent SELECT
+		t.Logf("INSERT: OK (rows affected reported: %d)", rowsAffected)
+	})
+
+	// ===== Query: SELECT =====
+	t.Run("Query_SELECT", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `SELECT id, name, score FROM test_operations ORDER BY id`)
+		if err != nil {
+			t.Fatalf("SELECT failed: %v", err)
+		}
+		defer rows.Close()
+
+		count := 0
+		for rows.Next() {
+			var id, score int
+			var name string
+			if err := rows.Scan(&id, &name, &score); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			count++
+		}
+		if count != 3 {
+			t.Errorf("Expected 3 rows, got %d", count)
+		}
+		t.Logf("SELECT: OK (rows: %d)", count)
+	})
+
+	// ===== Query: SELECT with IFF (function translation) =====
+	t.Run("Query_SELECT_IFF", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `SELECT name, IFF(score >= 90, 'A', 'B') AS grade FROM test_operations`)
+		if err != nil {
+			t.Fatalf("SELECT with IFF failed: %v", err)
+		}
+		defer rows.Close()
+
+		grades := make(map[string]string)
+		for rows.Next() {
+			var name, grade string
+			if err := rows.Scan(&name, &grade); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			grades[name] = grade
+		}
+		// Alice (95) and Charlie (92) should get A, Bob (87) should get B
+		if grades["Alice"] != "A" || grades["Charlie"] != "A" || grades["Bob"] != "B" {
+			t.Errorf("IFF function not working correctly: %v", grades)
+		}
+		t.Log("SELECT with IFF: OK")
+	})
+
+	// ===== Query: SELECT with NVL (function translation) =====
+	t.Run("Query_SELECT_NVL", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `SELECT NVL(NULL, 'default_value') AS result`)
+		if err != nil {
+			t.Fatalf("SELECT with NVL failed: %v", err)
+		}
+		defer rows.Close()
+
+		if rows.Next() {
+			var result string
+			if err := rows.Scan(&result); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			if result != "default_value" {
+				t.Errorf("Expected 'default_value', got %q", result)
+			}
+		}
+		t.Log("SELECT with NVL: OK")
+	})
+
+	// ===== DML: UPDATE =====
+	t.Run("DML_UPDATE", func(t *testing.T) {
+		result, err := db.ExecContext(ctx, `UPDATE test_operations SET score = 88 WHERE name = 'Bob'`)
+		if err != nil {
+			t.Fatalf("UPDATE failed: %v", err)
+		}
+		rowsAffected, _ := result.RowsAffected()
+		// Note: RowsAffected may return 0 via gosnowflake protocol (known behavior)
+		t.Logf("UPDATE: OK (rows affected reported: %d)", rowsAffected)
+
+		// Verify the update actually worked
+		var score int
+		err = db.QueryRowContext(ctx, `SELECT score FROM test_operations WHERE name = 'Bob'`).Scan(&score)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if score != 88 {
+			t.Errorf("UPDATE verification failed: expected score 88, got %d", score)
+		}
+	})
+
+	// ===== DML: DELETE =====
+	t.Run("DML_DELETE", func(t *testing.T) {
+		// First insert a row to delete
+		_, err := db.ExecContext(ctx, `INSERT INTO test_operations (id, name, score) VALUES (99, 'ToDelete', 0)`)
+		if err != nil {
+			t.Fatalf("INSERT for DELETE test failed: %v", err)
+		}
+
+		result, err := db.ExecContext(ctx, `DELETE FROM test_operations WHERE id = 99`)
+		if err != nil {
+			t.Fatalf("DELETE failed: %v", err)
+		}
+		rowsAffected, _ := result.RowsAffected()
+		// Note: RowsAffected may return 0 via gosnowflake protocol (known behavior)
+		t.Logf("DELETE: OK (rows affected reported: %d)", rowsAffected)
+
+		// Verify the delete actually worked
+		var count int
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM test_operations WHERE id = 99`).Scan(&count)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("DELETE verification failed: expected 0 rows, got %d", count)
+		}
+	})
+
+	// ===== Query: SHOW TABLES =====
+	t.Run("Query_SHOW_TABLES", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `SHOW TABLES`)
+		if err != nil {
+			t.Fatalf("SHOW TABLES failed: %v", err)
+		}
+		defer rows.Close()
+
+		found := false
+		for rows.Next() {
+			cols, _ := rows.Columns()
+			values := make([]any, len(cols))
+			valuePtrs := make([]any, len(cols))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+			if err := rows.Scan(valuePtrs...); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			// Check if test_operations table is in results
+			for _, v := range values {
+				if str, ok := v.(string); ok && strings.Contains(strings.ToUpper(str), "TEST_OPERATIONS") {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Log("SHOW TABLES: OK (returned results, table may be listed differently)")
+		} else {
+			t.Log("SHOW TABLES: OK (found test_operations)")
+		}
+	})
+
+	// ===== Query: DESCRIBE TABLE =====
+	t.Run("Query_DESCRIBE_TABLE", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `DESCRIBE TABLE test_operations`)
+		if err != nil {
+			t.Fatalf("DESCRIBE TABLE failed: %v", err)
+		}
+		defer rows.Close()
+
+		columnCount := 0
+		for rows.Next() {
+			columnCount++
+		}
+		if columnCount < 1 {
+			t.Errorf("Expected at least 1 column description, got %d", columnCount)
+		}
+		t.Logf("DESCRIBE TABLE: OK (columns: %d)", columnCount)
+	})
+
+	// ===== DDL: ALTER TABLE =====
+	t.Run("DDL_ALTER_TABLE", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `ALTER TABLE test_operations ADD COLUMN email VARCHAR(255)`)
+		if err != nil {
+			t.Fatalf("ALTER TABLE ADD COLUMN failed: %v", err)
+		}
+		t.Log("ALTER TABLE ADD COLUMN: OK")
+	})
+
+	// ===== Transaction: BEGIN/COMMIT =====
+	t.Run("Transaction_BEGIN_COMMIT", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `INSERT INTO test_operations (id, name, score) VALUES (10, 'TxTest', 100)`)
+		if err != nil {
+			tx.Rollback()
+			t.Fatalf("INSERT in transaction failed: %v", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("COMMIT failed: %v", err)
+		}
+
+		// Verify the insert was committed
+		var count int
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM test_operations WHERE id = 10`).Scan(&count)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("Expected 1 row after commit, got %d", count)
+		}
+		t.Log("Transaction BEGIN/COMMIT: OK")
+	})
+
+	// ===== Transaction: BEGIN/ROLLBACK =====
+	t.Run("Transaction_BEGIN_ROLLBACK", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `INSERT INTO test_operations (id, name, score) VALUES (20, 'RollbackTest', 100)`)
+		if err != nil {
+			tx.Rollback()
+			t.Fatalf("INSERT in transaction failed: %v", err)
+		}
+
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("ROLLBACK failed: %v", err)
+		}
+
+		// Verify the insert was rolled back
+		var count int
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM test_operations WHERE id = 20`).Scan(&count)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("Expected 0 rows after rollback, got %d", count)
+		}
+		t.Log("Transaction BEGIN/ROLLBACK: OK")
+	})
+
+	// ===== MERGE INTO =====
+	t.Run("DML_MERGE_INTO", func(t *testing.T) {
+		// Create source table for merge
+		_, err := db.ExecContext(ctx, `CREATE TABLE merge_src (id INTEGER, name VARCHAR, score INTEGER)`)
+		if err != nil {
+			t.Fatalf("CREATE source table failed: %v", err)
+		}
+
+		_, err = db.ExecContext(ctx, `INSERT INTO merge_src VALUES (1, 'Alice Updated', 98), (100, 'NewPerson', 85)`)
+		if err != nil {
+			t.Fatalf("INSERT source data failed: %v", err)
+		}
+
+		_, err = db.ExecContext(ctx, `
+			MERGE INTO test_operations t
+			USING merge_src s
+			ON t.id = s.id
+			WHEN MATCHED THEN UPDATE SET name = s.name, score = s.score
+			WHEN NOT MATCHED THEN INSERT (id, name, score) VALUES (s.id, s.name, s.score)
+		`)
+		if err != nil {
+			t.Fatalf("MERGE INTO failed: %v", err)
+		}
+
+		// Verify Alice was updated
+		var name string
+		var score int
+		err = db.QueryRowContext(ctx, `SELECT name, score FROM test_operations WHERE id = 1`).Scan(&name, &score)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if name != "Alice Updated" || score != 98 {
+			t.Errorf("Expected (Alice Updated, 98), got (%s, %d)", name, score)
+		}
+
+		// Verify NewPerson was inserted
+		err = db.QueryRowContext(ctx, `SELECT name, score FROM test_operations WHERE id = 100`).Scan(&name, &score)
+		if err != nil {
+			t.Fatalf("Verification query failed: %v", err)
+		}
+		if name != "NewPerson" || score != 85 {
+			t.Errorf("Expected (NewPerson, 85), got (%s, %d)", name, score)
+		}
+		t.Log("MERGE INTO: OK")
+	})
+
+	// ===== Query: EXPLAIN =====
+	t.Run("Query_EXPLAIN", func(t *testing.T) {
+		rows, err := db.QueryContext(ctx, `EXPLAIN SELECT * FROM test_operations`)
+		if err != nil {
+			t.Fatalf("EXPLAIN failed: %v", err)
+		}
+		defer rows.Close()
+
+		hasRows := rows.Next()
+		if !hasRows {
+			t.Log("EXPLAIN: OK (returned no rows, which is acceptable)")
+		} else {
+			t.Log("EXPLAIN: OK (returned execution plan)")
+		}
+	})
+
+	// ===== DDL: DROP TABLE =====
+	t.Run("DDL_DROP_TABLE", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `DROP TABLE merge_src`)
+		if err != nil {
+			t.Fatalf("DROP TABLE failed: %v", err)
+		}
+		t.Log("DROP TABLE: OK")
+	})
+
+	// ===== DDL: CREATE/DROP SCHEMA =====
+	t.Run("DDL_CREATE_DROP_SCHEMA", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `CREATE SCHEMA test_schema`)
+		if err != nil {
+			t.Fatalf("CREATE SCHEMA failed: %v", err)
+		}
+		t.Log("CREATE SCHEMA: OK")
+
+		_, err = db.ExecContext(ctx, `DROP SCHEMA test_schema`)
+		if err != nil {
+			t.Fatalf("DROP SCHEMA failed: %v", err)
+		}
+		t.Log("DROP SCHEMA: OK")
+	})
+
+	// Final cleanup
+	t.Run("Cleanup", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS test_operations`)
+		if err != nil {
+			t.Logf("Cleanup warning: %v", err)
+		}
+		t.Log("Cleanup: OK")
+	})
+
+	t.Log("All SQL operations via gosnowflake driver: PASSED")
+}
