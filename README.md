@@ -242,48 +242,6 @@ curl http://localhost:8080/api/v2/warehouses
 | `/api/v2/warehouses/{wh}:suspend` | POST | Suspend warehouse |
 | `/health` | GET | Health check |
 
-## Architecture
-
-```text
-snowflake-emulator/
-├── cmd/server/              # Application entry point
-├── pkg/
-│   ├── config/              # Configuration constants
-│   ├── connection/          # DuckDB connection manager (thread-safe)
-│   ├── contentdata/         # Table content data operations
-│   ├── metadata/            # Database/Schema/Table/Stage metadata
-│   ├── query/
-│   │   ├── executor.go      # Query execution engine with functional options
-│   │   ├── translator.go    # Snowflake → DuckDB SQL translation (AST-based)
-│   │   ├── classifier.go    # SQL statement classification
-│   │   ├── result.go        # Result types (Result, ExecResult, CopyResult, MergeResult)
-│   │   ├── table_naming.go  # DuckDB table name generation (DATABASE.SCHEMA_TABLE)
-│   │   ├── copy_processor.go    # COPY INTO implementation
-│   │   ├── merge_processor.go   # MERGE INTO implementation
-│   │   ├── statement_manager.go # Statement lifecycle management
-│   │   └── type_mapper.go   # DuckDB → Snowflake type mapping
-│   ├── session/             # Session & token management
-│   ├── stage/               # Internal stage file operations
-│   ├── types/               # Snowflake type definitions
-│   └── warehouse/           # Virtual warehouse management
-├── server/
-│   ├── apierror/            # Snowflake-compatible error responses
-│   ├── handlers/            # HTTP request handlers
-│   └── types/               # API request/response types
-└── tests/
-    ├── e2e/                 # End-to-end tests (gosnowflake driver)
-    └── integration/         # Integration tests
-```
-
-### Layer Design
-
-| Layer | Package | Responsibility |
-|-------|---------|----------------|
-| HTTP Server | `server/`, `server/handlers/` | REST endpoints, routing |
-| Service | `pkg/query/`, `pkg/session/` | Business logic, SQL execution |
-| Repository | `pkg/metadata/`, `pkg/contentdata/` | Data access abstraction |
-| Storage | `pkg/connection/` | DuckDB connection management |
-
 ## Limitations
 
 This emulator is designed for development and testing. The following features are not supported:
