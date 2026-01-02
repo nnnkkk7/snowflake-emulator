@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.4](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.3...v0.0.4) - 2026-01-02
+- docs: update README with new features and examples by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/20
+- test: add comprehensive SQL operations tests for integration and REST API by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/22
+- docs: update readme by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/24
+
 ## [v0.0.3](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.2...v0.0.3) - 2026-01-02
 - chore: refine GoReleaser configuration for native builds and clarify installation instructions by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/16
 - chore: improve dockerfile for security and performance by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/18
