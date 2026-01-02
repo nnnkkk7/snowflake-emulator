@@ -218,7 +218,6 @@ Complete working examples are available in the [`example/`](example/) directory:
 | Example | Description |
 |---------|-------------|
 | [`gosnowflake/`](example/gosnowflake/) | Basic usage with gosnowflake driver |
-| [`embedded/`](example/embedded/) | In-process testing without HTTP server (ideal for unit tests) |
 | [`restapi/`](example/restapi/) | REST API v2 usage for any programming language |
 | [`docker/`](example/docker/) | Docker container usage example |
 
