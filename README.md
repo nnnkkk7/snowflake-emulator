@@ -13,7 +13,7 @@ Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckD
 
 - **Local & CI workflows** - Run Snowflake-compatible SQL with no external dependencies
 - **Snowflake-compatible access** - `gosnowflake` driver support and REST API v2
-- **SQL execution** - Snowflake → DuckDB translation with `COPY INTO` / `MERGE INTO` support
+- **SQL execution** - Snowflake → DuckDB translation
 
 ## Features
 
@@ -34,7 +34,7 @@ The emulator supports standard SQL operations with automatic Snowflake-to-DuckDB
 | **Data Loading** | `COPY INTO` | Bulk data loading from internal stages (CSV, JSON) |
 | **Upsert** | `MERGE INTO` | Conditional insert/update/delete operations |
 
-**Parameter Binding**: Supports positional parameters (`:1`, `:2`, `?`) for prepared statements.
+**Parameter Binding**: Supports positional placeholder substitution (`:1`, `:2`, `?`).
 
 ### Supported SQL Functions
 
