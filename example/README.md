@@ -45,22 +45,7 @@ go run ./example/restapi
 - Listing resources
 - Error handling
 
-### 3. Embedded Library (`embedded/`)
-
-Demonstrates using the emulator as an in-process library without an external server. This is ideal for unit tests.
-
-```bash
-# No server needed - runs entirely in-process
-go run ./example/embedded
-```
-
-**Features demonstrated:**
-- In-process emulator setup
-- Using httptest.Server for local testing
-- All Snowflake SQL function translations
-- Clean teardown
-
-### 4. Docker (`docker/`)
+### 3. Docker (`docker/`)
 
 Demonstrates using the emulator running in a Docker container.
 
@@ -110,9 +95,6 @@ testuser:testpass@localhost:8080/TEST_DB/PUBLIC?account=testaccount&protocol=htt
 ```bash
 # Build all examples (syntax check)
 go build ./example/...
-
-# Run embedded example (no server required)
-go run ./example/embedded
 
 # Run gosnowflake and restapi examples (requires server)
 go run ./cmd/server &
