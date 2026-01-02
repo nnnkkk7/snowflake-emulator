@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.3](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.2...v0.0.3) - 2026-01-02
+- chore: refine GoReleaser configuration for native builds and clarify installation instructions by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/16
+- chore: improve dockerfile for security and performance by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/18
+- docs: remove architecture and layer design sections by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/19
+
 ## [v0.0.2](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.1...v0.0.2) - 2025-12-31
 - feat: add Renovate configuration for dependency management by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/4
 - ci: remove unnecessary by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/6
