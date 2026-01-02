@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.5](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.4...v0.0.5) - 2026-01-02
+- docs: remove Snowflake SQL Functions Supported section by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/25
+
 ## [v0.0.4](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.3...v0.0.4) - 2026-01-02
 - docs: update README with new features and examples by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/20
 - test: add comprehensive SQL operations tests for integration and REST API by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/22
