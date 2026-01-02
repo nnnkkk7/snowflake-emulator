@@ -5,27 +5,36 @@ A lightweight, open-source Snowflake emulator built with Go and DuckDB, designed
 [![CI](https://github.com/nnnkkk7/snowflake-emulator/workflows/CI/badge.svg)](https://github.com/nnnkkk7/snowflake-emulator/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/nnnkkk7/snowflake-emulator)](https://goreportcard.com/report/github.com/nnnkkk7/snowflake-emulator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Reference](https://pkg.go.dev/badge/github.com/nnnkkk7/snowflake-emulator.svg)](https://pkg.go.dev/github.com/nnnkkk7/snowflake-emulator)
 
 ## Overview
 
-Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckDB, enabling developers to:
+Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckDB for local development and testing:
 
-- **Test locally** - Run Snowflake SQL queries without cloud costs
-- **CI/CD integration** - Automated testing with realistic Snowflake syntax
-- **Rapid development** - No network latency, instant query feedback
-- **gosnowflake compatible** - Works with the official Go driver out of the box
+- **Local & CI workflows** - Run Snowflake-compatible SQL with no external dependencies
+- **Snowflake-compatible access** - `gosnowflake` driver support and REST API v2
+- **SQL execution** - Snowflake → DuckDB translation with `COPY INTO` / `MERGE INTO` support
 
 ## Features
 
-### Core Capabilities
+The sections below summarize supported operations, functions, and data types.
 
-- **gosnowflake Driver Support** - Full compatibility with the official Snowflake Go driver
-- **REST API v2** - SQL statements API for language-agnostic access
-- **SQL Translation** - Automatic Snowflake SQL to DuckDB conversion
-- **COPY INTO Support** - Load data from internal stages (CSV, JSON)
-- **MERGE INTO Support** - Upsert operations with native DuckDB MERGE or decomposed statements
-- **Metadata Management** - Database, Schema, Table, Stage, Warehouse tracking
-- **Session Management** - Token-based authentication (development mode)
+### Supported SQL Operations
+
+The emulator supports standard SQL operations with automatic Snowflake-to-DuckDB translation:
+
+| Category | Operations | Description |
+|----------|------------|-------------|
+| **Query** | `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN` | Read operations with full result set support |
+| **DML** | `INSERT`, `UPDATE`, `DELETE` | Data manipulation with rows affected count |
+| **DDL** | `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE` | Schema management |
+| **DDL** | `CREATE DATABASE`, `DROP DATABASE` | Database management |
+| **DDL** | `CREATE SCHEMA`, `DROP SCHEMA` | Schema namespace management |
+| **Transaction** | `BEGIN`, `COMMIT`, `ROLLBACK` | Transaction control |
+| **Data Loading** | `COPY INTO` | Bulk data loading from internal stages (CSV, JSON) |
+| **Upsert** | `MERGE INTO` | Conditional insert/update/delete operations |
+
+**Parameter Binding**: Supports positional parameters (`:1`, `:2`, `?`) for prepared statements.
 
 ### Supported SQL Functions
 
@@ -196,6 +205,27 @@ curl -X POST http://localhost:8080/api/v2/databases \
 
 # List warehouses
 curl http://localhost:8080/api/v2/warehouses
+```
+
+## Examples
+
+Complete working examples are available in the [`example/`](example/) directory:
+
+| Example | Description |
+|---------|-------------|
+| [`gosnowflake/`](example/gosnowflake/) | Basic usage with gosnowflake driver |
+| [`embedded/`](example/embedded/) | In-process testing without HTTP server (ideal for unit tests) |
+| [`restapi/`](example/restapi/) | REST API v2 usage for any programming language |
+| [`docker/`](example/docker/) | Docker container usage example |
+
+Run an example:
+
+```bash
+# Start the emulator
+go run ./cmd/server
+
+# In another terminal, run an example
+go run ./example/gosnowflake
 ```
 
 ## Configuration
