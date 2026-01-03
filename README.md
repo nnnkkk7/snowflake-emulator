@@ -13,10 +13,10 @@ A lightweight, open-source Snowflake emulator built with Go and DuckDB, designed
 
 ## Overview
 
-Snowflake Emulator provides a Snowflake-compatible SQL interface backed by DuckDB for local development and testing:
+Snowflake Emulator provides a [Snowflake](https://www.snowflake.com/)-compatible SQL interface backed by DuckDB for local development and testing:
 
 - **Local & CI workflows** - Run Snowflake-compatible SQL with no external dependencies
-- **Snowflake-compatible access** - `gosnowflake` driver support and REST API v2
+- **Snowflake-compatible access** - [`gosnowflake`](https://github.com/snowflakedb/gosnowflake) driver support and REST API v2
 - **SQL execution** - Snowflake → DuckDB translation
 
 ## Features
