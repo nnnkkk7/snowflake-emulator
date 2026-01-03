@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	_ "github.com/marcboeker/go-duckdb"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 )
