@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
+	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/google/go-cmp/cmp"
-	_ "github.com/marcboeker/go-duckdb"
 )
 
 // setupTestDuckDB creates an in-memory DuckDB database for testing.

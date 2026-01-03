@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/go-chi/chi/v5"
-	_ "github.com/marcboeker/go-duckdb"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/query"
