@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.6](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.5...v0.0.6) - 2026-01-03
+- chore: remove unnecessary example by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/30
+- docs: add link by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/32
+- deps: replace duckdb client by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/33
+
 ## [v0.0.5](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.4...v0.0.5) - 2026-01-02
 - docs: remove Snowflake SQL Functions Supported section by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/25
 
