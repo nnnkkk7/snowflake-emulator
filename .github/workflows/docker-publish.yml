@@ -1,9 +1,22 @@
 name: Publish Docker Image
 
 on:
-  release:
-    types: [published]
+  # Trigger when Release workflow completes successfully
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
+    branches:
+      - main
+
+  # Manual trigger for existing tags or re-runs
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.0.0). Uses latest tag if not specified.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,18 +29,75 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # Only run if:
+    # 1. Triggered by successful Release workflow, OR
+    # 2. Manually dispatched
+    if: |
+      (github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Get tag name
+        id: get-tag
+        run: |
+          # Fetch all tags to ensure we have the latest
+          git fetch --tags --force
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger
+            if [ -n "${{ inputs.tag }}" ]; then
+              TAG="${{ inputs.tag }}"
+            else
+              # No tag specified - use the latest tag
+              TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+              if [ -z "$TAG" ]; then
+                echo "Error: No tag specified and no tags found in repository"
+                exit 1
+              fi
+              echo "No tag specified, using latest tag: $TAG"
+            fi
+          else
+            # Auto trigger from workflow_run
+            # Find tag pointing to the HEAD commit (the commit that was just released)
+            TAG=$(git tag --points-at HEAD | grep '^v' | sort -V | tail -n1)
+            if [ -z "$TAG" ]; then
+              echo "No tag found on commit ${{ github.event.workflow_run.head_sha }}"
+              echo "::notice::Skipping Docker build - no release tag found on this commit"
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "Docker image tag: $TAG"
+
+          # Extract version without 'v' prefix for semver tags
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Checkout tag
+        if: steps.get-tag.outputs.skip != 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ steps.get-tag.outputs.tag }}
 
       - name: Set up QEMU
+        if: steps.get-tag.outputs.skip != 'true'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
+        if: steps.get-tag.outputs.skip != 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to GitHub Container Registry
+        if: steps.get-tag.outputs.skip != 'true'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -35,18 +105,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
+        if: steps.get-tag.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{version}},value=${{ steps.get-tag.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.get-tag.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.get-tag.outputs.tag }}
             type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' }}
 
       - name: Build and push
+        if: steps.get-tag.outputs.skip != 'true'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
