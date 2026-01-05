@@ -9,7 +9,29 @@ A lightweight, open-source Snowflake emulator built with Go and DuckDB, designed
 [![CI](https://github.com/nnnkkk7/snowflake-emulator/workflows/CI/badge.svg)](https://github.com/nnnkkk7/snowflake-emulator/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/nnnkkk7/snowflake-emulator.svg)](https://pkg.go.dev/github.com/nnnkkk7/snowflake-emulator)
+[![GitHub Stars](https://img.shields.io/github/stars/nnnkkk7/snowflake-emulator?style=social)](https://github.com/nnnkkk7/snowflake-emulator)
 
+⭐ Like it? Give us a star!
+
+## TL;DR
+
+```bash
+docker run -p 8080:8080 ghcr.io/nnnkkk7/snowflake-emulator:latest
+```
+
+```go
+dsn := "user:pass@localhost:8080/TEST_DB/PUBLIC?account=test&protocol=http"
+db, _ := sql.Open("snowflake", dsn)
+rows, _ := db.Query("SELECT IFF(1>0,'yes','no')")  // Snowflake SQL works!
+```
+
+## Use Cases
+
+- Run integration tests locally without Snowflake credentials (Go via gosnowflake, or any language via REST API)
+- Cheap & fast CI smoke tests for Snowflake SQL
+- Validate Snowflake-ish SQL behavior before hitting real Snowflake
+
+> **Note**: This is a dev/test emulator — no auth, no clustering, no external stages, no JS stored procedures. See [Limitations](#limitations) for details.
 
 ## Overview
 
@@ -19,64 +41,10 @@ Snowflake Emulator provides a [Snowflake](https://www.snowflake.com/)-compatible
 - **Snowflake-compatible access** - [`gosnowflake`](https://github.com/snowflakedb/gosnowflake) driver support and REST API v2
 - **SQL execution** - Snowflake → DuckDB translation
 
-## Features
+## Installation
 
-The sections below summarize supported operations, functions, and data types.
-
-### Supported SQL Operations
-
-The emulator supports standard SQL operations with automatic Snowflake-to-DuckDB translation:
-
-| Category | Operations | Description |
-|----------|------------|-------------|
-| **Query** | `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN` | Read operations with full result set support |
-| **DML** | `INSERT`, `UPDATE`, `DELETE` | Data manipulation with rows affected count |
-| **DDL** | `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE` | Schema management |
-| **DDL** | `CREATE DATABASE`, `DROP DATABASE` | Database management |
-| **DDL** | `CREATE SCHEMA`, `DROP SCHEMA` | Schema namespace management |
-| **Transaction** | `BEGIN`, `COMMIT`, `ROLLBACK` | Transaction control |
-| **Data Loading** | `COPY INTO` | Bulk data loading from internal stages (CSV, JSON) |
-| **Upsert** | `MERGE INTO` | Conditional insert/update/delete operations |
-
-**Parameter Binding**: Supports positional placeholder substitution (`:1`, `:2`, `?`).
-
-### Supported SQL Functions
-
-| Snowflake | DuckDB | Description |
-|-----------|--------|-------------|
-| `IFF(cond, t, f)` | `IF(cond, t, f)` | Conditional expression |
-| `NVL(a, b)` | `COALESCE(a, b)` | Null value substitution |
-| `NVL2(a, b, c)` | `IF(a IS NOT NULL, b, c)` | Null conditional |
-| `IFNULL(a, b)` | `COALESCE(a, b)` | Null value substitution |
-| `DATEADD(part, n, date)` | `date + INTERVAL n part` | Date arithmetic |
-| `DATEDIFF(part, start, end)` | `DATE_DIFF('part', start, end)` | Date difference |
-| `TO_VARIANT(x)` | `CAST(x AS JSON)` | Convert to variant |
-| `PARSE_JSON(str)` | `CAST(str AS JSON)` | Parse JSON string |
-| `OBJECT_CONSTRUCT(...)` | `json_object(...)` | Build JSON object |
-| `LISTAGG(col, sep)` | `STRING_AGG(col, sep)` | String aggregation |
-| `FLATTEN(...)` | `UNNEST(...)` | Array expansion |
-
-### Supported Data Types
-
-| Snowflake Type | DuckDB Type |
-|----------------|-------------|
-| NUMBER, NUMERIC, DECIMAL | DOUBLE / DECIMAL(p,s) |
-| INTEGER, BIGINT, SMALLINT, TINYINT | INTEGER / BIGINT |
-| FLOAT, DOUBLE, REAL | DOUBLE |
-| VARCHAR, STRING, TEXT, CHAR | VARCHAR |
-| BOOLEAN | BOOLEAN |
-| DATE | DATE |
-| TIME | TIME |
-| TIMESTAMP, TIMESTAMP_NTZ | TIMESTAMP |
-| TIMESTAMP_LTZ, TIMESTAMP_TZ | TIMESTAMPTZ |
-| VARIANT, OBJECT | JSON |
-| ARRAY | JSON |
-| BINARY, VARBINARY | BLOB |
-| GEOGRAPHY, GEOMETRY | VARCHAR (WKT) |
-
-## Quick Start
-
-### Platform Support
+<details>
+<summary><b>Platform Support</b></summary>
 
 | Platform | Docker | Binary |
 |----------|--------|--------|
@@ -88,9 +56,9 @@ The emulator supports standard SQL operations with automatic Snowflake-to-DuckDB
 
 > **Note**: Binary releases are only available for Linux x86_64. This is due to DuckDB requiring CGO, which makes cross-compilation complex. For all other platforms, Docker is recommended.
 
-### Installation
+</details>
 
-#### Docker (Recommended)
+### Docker (Recommended)
 
 Docker is the recommended installation method for all platforms.
 
@@ -107,18 +75,7 @@ docker run -p 8080:8080 -v snowflake-data:/data \
   ghcr.io/nnnkkk7/snowflake-emulator:latest
 ```
 
-#### Docker Compose
-
-```bash
-# Clone the repository
-git clone https://github.com/nnnkkk7/snowflake-emulator.git
-cd snowflake-emulator
-
-# Start with Docker Compose
-docker compose up
-```
-
-#### Build from Source (Linux x86_64)
+### Build from Source (Linux x86_64)
 
 Prerequisites:
 
@@ -211,17 +168,13 @@ curl -X POST http://localhost:8080/api/v2/databases \
 curl http://localhost:8080/api/v2/warehouses
 ```
 
-## Examples
-
-Complete working examples are available in the [`example/`](example/) directory:
+## Next Steps
 
 | Example | Description |
 |---------|-------------|
-| [`gosnowflake/`](example/gosnowflake/) | Basic usage with gosnowflake driver |
-| [`restapi/`](example/restapi/) | REST API v2 usage for any programming language |
-| [`docker/`](example/docker/) | Docker container usage example |
-
-Run an example:
+| [`gosnowflake/`](example/gosnowflake/) | Go driver example |
+| [`restapi/`](example/restapi/) | REST API v2 example |
+| [`docker/`](example/docker/) | Docker container example |
 
 ```bash
 # Start the emulator
@@ -274,6 +227,68 @@ go run ./example/gosnowflake
 | `/api/v2/warehouses/{wh}:resume` | POST | Resume warehouse |
 | `/api/v2/warehouses/{wh}:suspend` | POST | Suspend warehouse |
 | `/health` | GET | Health check |
+
+## Compatibility
+
+<details>
+<summary><b>Supported SQL Operations</b></summary>
+
+The emulator supports standard SQL operations with automatic Snowflake-to-DuckDB translation:
+
+| Category | Operations | Description |
+|----------|------------|-------------|
+| **Query** | `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN` | Read operations with full result set support |
+| **DML** | `INSERT`, `UPDATE`, `DELETE` | Data manipulation with rows affected count |
+| **DDL** | `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE` | Schema management |
+| **DDL** | `CREATE DATABASE`, `DROP DATABASE` | Database management |
+| **DDL** | `CREATE SCHEMA`, `DROP SCHEMA` | Schema namespace management |
+| **Transaction** | `BEGIN`, `COMMIT`, `ROLLBACK` | Transaction control |
+| **Data Loading** | `COPY INTO` | Bulk data loading from internal stages (CSV, JSON) |
+| **Upsert** | `MERGE INTO` | Conditional insert/update/delete operations |
+
+**Parameter Binding**: Supports positional placeholder substitution (`:1`, `:2`, `?`).
+
+</details>
+
+<details>
+<summary><b>Supported SQL Functions</b></summary>
+
+| Snowflake | DuckDB | Description |
+|-----------|--------|-------------|
+| `IFF(cond, t, f)` | `IF(cond, t, f)` | Conditional expression |
+| `NVL(a, b)` | `COALESCE(a, b)` | Null value substitution |
+| `NVL2(a, b, c)` | `IF(a IS NOT NULL, b, c)` | Null conditional |
+| `IFNULL(a, b)` | `COALESCE(a, b)` | Null value substitution |
+| `DATEADD(part, n, date)` | `date + INTERVAL n part` | Date arithmetic |
+| `DATEDIFF(part, start, end)` | `DATE_DIFF('part', start, end)` | Date difference |
+| `TO_VARIANT(x)` | `CAST(x AS JSON)` | Convert to variant |
+| `PARSE_JSON(str)` | `CAST(str AS JSON)` | Parse JSON string |
+| `OBJECT_CONSTRUCT(...)` | `json_object(...)` | Build JSON object |
+| `LISTAGG(col, sep)` | `STRING_AGG(col, sep)` | String aggregation |
+| `FLATTEN(...)` | `UNNEST(...)` | Array expansion |
+
+</details>
+
+<details>
+<summary><b>Supported Data Types</b></summary>
+
+| Snowflake Type | DuckDB Type |
+|----------------|-------------|
+| NUMBER, NUMERIC, DECIMAL | DOUBLE / DECIMAL(p,s) |
+| INTEGER, BIGINT, SMALLINT, TINYINT | INTEGER / BIGINT |
+| FLOAT, DOUBLE, REAL | DOUBLE |
+| VARCHAR, STRING, TEXT, CHAR | VARCHAR |
+| BOOLEAN | BOOLEAN |
+| DATE | DATE |
+| TIME | TIME |
+| TIMESTAMP, TIMESTAMP_NTZ | TIMESTAMP |
+| TIMESTAMP_LTZ, TIMESTAMP_TZ | TIMESTAMPTZ |
+| VARIANT, OBJECT | JSON |
+| ARRAY | JSON |
+| BINARY, VARBINARY | BLOB |
+| GEOGRAPHY, GEOMETRY | VARCHAR (WKT) |
+
+</details>
 
 ## Limitations
 
