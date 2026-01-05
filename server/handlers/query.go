@@ -153,7 +153,7 @@ func (h *QueryHandler) AbortQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Phase 1: Accept abort requests but don't track running queries yet
+	// TODO: Implement query cancellation tracking
 	resp := types.AbortResponse{
 		Success: true,
 		Message: "Query abort requested (not yet implemented)",

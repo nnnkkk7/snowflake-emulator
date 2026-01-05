@@ -453,11 +453,11 @@ func TestIntegration_SessionRenewal(t *testing.T) {
 	}
 }
 
-// TestIntegration_Phase2Functions tests Phase 2 SQL function translations.
-func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integration test covers multiple Phase 2 functions
+// TestIntegration_AdvancedFunctions tests advanced SQL function translations.
+func TestIntegration_AdvancedFunctions(t *testing.T) { //nolint:gocyclo // Integration test covers multiple advanced functions
 	server, _, repo := setupTestServer(t)
 
-	// Create test table with nullable and date columns for Phase 2 tests
+	// Create test table with nullable and date columns for function tests
 	ctx := context.Background()
 	database, _ := repo.GetDatabaseByName(ctx, "TEST_DB")
 	schemas, _ := repo.ListSchemas(ctx, database.ID)
@@ -476,7 +476,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		{Name: "CREATED_AT", Type: "DATE"},
 		{Name: "DATA", Type: "VARCHAR", Nullable: true},
 	}
-	_, _ = repo.CreateTable(ctx, schema.ID, "PHASE2_TEST", columns, "Phase 2 test data")
+	_, _ = repo.CreateTable(ctx, schema.ID, "FUNCTION_TEST", columns, "Function test data")
 
 	// Login
 	loginReq := map[string]interface{}{
@@ -499,7 +499,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 
 	// Insert test data
 	insertReq := map[string]string{
-		"sqlText": `INSERT INTO TEST_DB.PUBLIC_PHASE2_TEST VALUES
+		"sqlText": `INSERT INTO TEST_DB.PUBLIC_FUNCTION_TEST VALUES
 			(1, 'Alice', 'alice@example.com', 95, '2024-01-15', '{"role": "admin"}'),
 			(2, 'Bob', NULL, 87, '2024-02-20', NULL),
 			(3, 'Charlie', 'charlie@example.com', NULL, '2024-03-25', '{"role": "user"}')`,
@@ -518,7 +518,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 	}{
 		{
 			name:    "NVL2",
-			sqlText: "SELECT NAME, NVL2(EMAIL, 'has email', 'no email') AS STATUS FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			sqlText: "SELECT NAME, NVL2(EMAIL, 'has email', 'no email') AS STATUS FROM TEST_DB.PUBLIC_FUNCTION_TEST ORDER BY ID",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 3 {
 					t.Errorf("Expected 3 rows, got %d", len(rowset))
@@ -536,7 +536,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "DATEADD",
-			sqlText: "SELECT NAME, DATEADD(day, 30, CREATED_AT) AS DUE_DATE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			sqlText: "SELECT NAME, DATEADD(day, 30, CREATED_AT) AS DUE_DATE FROM TEST_DB.PUBLIC_FUNCTION_TEST ORDER BY ID LIMIT 1",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 1 {
 					t.Errorf("Expected 1 row, got %d", len(rowset))
@@ -547,7 +547,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "DATEDIFF",
-			sqlText: "SELECT NAME, DATEDIFF(day, CREATED_AT, CURRENT_DATE()) AS DAYS_SINCE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			sqlText: "SELECT NAME, DATEDIFF(day, CREATED_AT, CURRENT_DATE()) AS DAYS_SINCE FROM TEST_DB.PUBLIC_FUNCTION_TEST ORDER BY ID LIMIT 1",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 1 {
 					t.Errorf("Expected 1 row, got %d", len(rowset))
@@ -562,7 +562,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "TO_VARIANT",
-			sqlText: "SELECT NAME, TO_VARIANT(SCORE) AS SCORE_JSON FROM TEST_DB.PUBLIC_PHASE2_TEST WHERE SCORE IS NOT NULL ORDER BY ID",
+			sqlText: "SELECT NAME, TO_VARIANT(SCORE) AS SCORE_JSON FROM TEST_DB.PUBLIC_FUNCTION_TEST WHERE SCORE IS NOT NULL ORDER BY ID",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 2 {
 					t.Errorf("Expected 2 rows, got %d", len(rowset))
@@ -571,7 +571,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "OBJECT_CONSTRUCT",
-			sqlText: "SELECT NAME, OBJECT_CONSTRUCT('name', NAME, 'score', SCORE) AS USER_OBJ FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID LIMIT 1",
+			sqlText: "SELECT NAME, OBJECT_CONSTRUCT('name', NAME, 'score', SCORE) AS USER_OBJ FROM TEST_DB.PUBLIC_FUNCTION_TEST ORDER BY ID LIMIT 1",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 1 {
 					t.Errorf("Expected 1 row, got %d", len(rowset))
@@ -580,7 +580,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "LISTAGG",
-			sqlText: "SELECT LISTAGG(NAME, ', ') AS ALL_NAMES FROM TEST_DB.PUBLIC_PHASE2_TEST",
+			sqlText: "SELECT LISTAGG(NAME, ', ') AS ALL_NAMES FROM TEST_DB.PUBLIC_FUNCTION_TEST",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 1 {
 					t.Errorf("Expected 1 row, got %d", len(rowset))
@@ -595,7 +595,7 @@ func TestIntegration_Phase2Functions(t *testing.T) { //nolint:gocyclo // Integra
 		},
 		{
 			name:    "Combined NVL2 with IFF",
-			sqlText: "SELECT NAME, NVL2(SCORE, IFF(SCORE >= 90, 'A', 'B'), 'N/A') AS GRADE FROM TEST_DB.PUBLIC_PHASE2_TEST ORDER BY ID",
+			sqlText: "SELECT NAME, NVL2(SCORE, IFF(SCORE >= 90, 'A', 'B'), 'N/A') AS GRADE FROM TEST_DB.PUBLIC_FUNCTION_TEST ORDER BY ID",
 			validate: func(t *testing.T, rowset []interface{}) {
 				if len(rowset) != 3 {
 					t.Errorf("Expected 3 rows, got %d", len(rowset))
@@ -675,7 +675,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	var errResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&errResp)
 	// Note: Current implementation creates DB if not exists, so this actually succeeds
-	// In Phase 2 with authentication, non-existent DB will properly fail
+	// TODO: When authentication is implemented, non-existent DB will properly fail
 
 	// Test 2: Query without authentication
 	queryReq := map[string]string{

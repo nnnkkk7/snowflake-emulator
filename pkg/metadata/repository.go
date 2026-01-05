@@ -209,10 +209,10 @@ func (r *Repository) CreateDatabase(ctx context.Context, name, comment string) (
 			return fmt.Errorf("failed to create DuckDB schema: %w", err)
 		}
 
-		// Insert metadata (account_id defaults to empty string for Phase 1)
+		// Insert metadata
 		query := `INSERT INTO _metadata_databases (id, name, account_id, comment, created_at, owner)
 		          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
-		accountID := "" // Default to empty for Phase 1; will be populated in Phase 2
+		accountID := "" // TODO: Populate when multi-tenancy is implemented
 		if _, err := tx.ExecContext(ctx, query, id, normalizedName, accountID, comment, ""); err != nil {
 			// Check if it's a duplicate
 			if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Constraint Error") {
