@@ -29,7 +29,7 @@ func NewTranslator() *Translator {
 
 // registerFunctions registers all Snowflake to DuckDB function translations.
 func (t *Translator) registerFunctions() {
-	// Simple function renames (Phase 1 + Phase 2)
+	// Simple function renames
 	t.functionMap["IFF"] = FunctionTranslator{Name: "IF"}
 	t.functionMap["NVL"] = FunctionTranslator{Name: "COALESCE"}
 	t.functionMap["IFNULL"] = FunctionTranslator{Name: "COALESCE"}

@@ -22,7 +22,7 @@ const (
 	StateSuspending State = "SUSPENDING"
 )
 
-// Warehouse represents a Snowflake virtual warehouse (metadata only for Phase 1).
+// Warehouse represents a Snowflake virtual warehouse (metadata only, no actual compute resources).
 type Warehouse struct {
 	ID          string
 	Name        string
@@ -35,8 +35,8 @@ type Warehouse struct {
 	AutoSuspend int // seconds
 }
 
-// Manager manages virtual warehouses (metadata only for Phase 1).
-// In Phase 2, this will manage actual compute resources.
+// Manager manages virtual warehouses (metadata only).
+// TODO: Implement actual compute resource management if needed.
 type Manager struct {
 	mu         sync.RWMutex
 	warehouses map[string]*Warehouse // keyed by name (uppercase)
@@ -81,7 +81,7 @@ func (m *Manager) CreateWarehouse(_ context.Context, name, size, comment string)
 		Size:        size,
 		Comment:     comment,
 		CreatedAt:   time.Now(),
-		Owner:       "", // Will be set from session in Phase 2
+		Owner:       "", // TODO: Set from session when auth is implemented
 		AutoResume:  true,
 		AutoSuspend: 600, // Default 10 minutes
 	}
@@ -109,7 +109,7 @@ func (m *Manager) GetWarehouse(_ context.Context, name string) (*Warehouse, erro
 }
 
 // ResumeWarehouse transitions a warehouse from SUSPENDED to ACTIVE state.
-// In Phase 1, this is metadata-only. In Phase 2, this will allocate compute resources.
+// This is metadata-only; no actual compute resources are allocated.
 func (m *Manager) ResumeWarehouse(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,14 +129,13 @@ func (m *Manager) ResumeWarehouse(_ context.Context, name string) error {
 		return fmt.Errorf("warehouse %s is in %s state, cannot resume", normalizedName, warehouse.State)
 	}
 
-	// Phase 1: Just update state (no actual compute)
 	warehouse.State = StateActive
 
 	return nil
 }
 
 // SuspendWarehouse transitions a warehouse from ACTIVE to SUSPENDED state.
-// In Phase 1, this is metadata-only. In Phase 2, this will deallocate compute resources.
+// This is metadata-only; no actual compute resources are deallocated.
 func (m *Manager) SuspendWarehouse(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -156,7 +155,6 @@ func (m *Manager) SuspendWarehouse(_ context.Context, name string) error {
 		return fmt.Errorf("warehouse %s is in %s state, cannot suspend", normalizedName, warehouse.State)
 	}
 
-	// Phase 1: Just update state (no actual compute)
 	warehouse.State = StateSuspended
 
 	return nil

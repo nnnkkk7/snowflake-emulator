@@ -147,8 +147,7 @@ func TestTranslator_NVL(t *testing.T) {
 }
 
 // TestTranslator_CONCAT tests CONCAT function handling.
-// Phase 1: CONCAT is not translated (deferred to Phase 2)
-// Expected behavior: Pass-through (lowercase keywords due to AST parser)
+// CONCAT is passed through without translation.
 func TestTranslator_CONCAT(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -322,7 +321,7 @@ func TestTranslator_ComplexQuery(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "Phase1Functions_IFF_NVL",
+			name: "BasicFunctions_IFF_NVL",
 			input: `SELECT
 				NVL(email, 'no-email@example.com') AS email,
 				IFF(age >= 18, 'adult', 'minor') AS age_group
@@ -766,7 +765,7 @@ func TestTranslator_FLATTEN(t *testing.T) {
 	}
 }
 
-// TestTranslator_LISTAGG tests LISTAGG function translation (already implemented in Phase 1).
+// TestTranslator_LISTAGG tests LISTAGG function translation.
 // LISTAGG(col, sep) → STRING_AGG(col, sep)
 func TestTranslator_LISTAGG(t *testing.T) {
 	tests := []struct {
@@ -814,8 +813,8 @@ func TestTranslator_LISTAGG(t *testing.T) {
 	}
 }
 
-// TestTranslator_Phase2Combined tests combinations of Phase 2 functions.
-func TestTranslator_Phase2Combined(t *testing.T) {
+// TestTranslator_CombinedFunctions tests combinations of multiple translated functions.
+func TestTranslator_CombinedFunctions(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -847,7 +846,7 @@ func TestTranslator_Phase2Combined(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name:     "ComplexPhase2",
+			name:     "ComplexCombined",
 			input:    "SELECT NVL2(data, TO_VARIANT(data), PARSE_JSON('null')) FROM test",
 			expected: "select IF(data is not null, CAST(data AS JSON), CAST('null' AS JSON)) from test",
 			wantErr:  false,

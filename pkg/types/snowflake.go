@@ -25,7 +25,7 @@ const (
 	TypeTimestampLTZ SnowflakeType = "TIMESTAMP_LTZ"
 	TypeTimestampTZ  SnowflakeType = "TIMESTAMP_TZ"
 
-	// Semi-structured types (Phase 2)
+	// Semi-structured types
 	TypeVariant SnowflakeType = "VARIANT"
 	TypeObject  SnowflakeType = "OBJECT"
 	TypeArray   SnowflakeType = "ARRAY"

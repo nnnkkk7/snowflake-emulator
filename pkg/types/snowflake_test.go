@@ -7,14 +7,13 @@ import (
 )
 
 // TestSnowflakeType_ToDuckDBType tests the conversion from Snowflake types to DuckDB types.
-// This test covers Phase 1 required types as specified in DESIGN.md Section 6.1.
 func TestSnowflakeType_ToDuckDBType(t *testing.T) {
 	tests := []struct {
 		name string
 		in   SnowflakeType
 		want string
 	}{
-		// Phase 1 core types
+		// Core types
 		{name: "NUMBER", in: TypeNumber, want: "DOUBLE"},
 		{name: "INTEGER", in: TypeInteger, want: "BIGINT"},
 		{name: "FLOAT", in: TypeFloat, want: "DOUBLE"},
@@ -28,7 +27,7 @@ func TestSnowflakeType_ToDuckDBType(t *testing.T) {
 		{name: "TIMESTAMP_LTZ", in: TypeTimestampLTZ, want: "TIMESTAMPTZ"},
 		{name: "TIMESTAMP_TZ", in: TypeTimestampTZ, want: "TIMESTAMPTZ"},
 
-		// Semi-structured data (Phase 2, but include in tests)
+		// Semi-structured data
 		{name: "VARIANT", in: TypeVariant, want: "JSON"},
 		{name: "OBJECT", in: TypeObject, want: "JSON"},
 		{name: "ARRAY", in: TypeArray, want: "JSON"},
