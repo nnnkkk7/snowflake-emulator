@@ -10,7 +10,8 @@
 
     # GitHub Release creation method
     # true: auto create, draft: create draft, false: do not create
-    release = draft
+    # Set to false - GoReleaser handles release creation
+    release = false
 
     # Labels indicating major version upgrade
     majorLabels = ["breaking-change", "major"]
