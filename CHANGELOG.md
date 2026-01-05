@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.7](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.6...v0.0.7) - 2026-01-05
+- docs: update README.md to enhance clarity and structure by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/36
+- ci: fix release workflow by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/38
+
 ## [v0.0.6](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.5...v0.0.6) - 2026-01-03
 - chore: remove unnecessary example by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/30
 - docs: add link by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/32
