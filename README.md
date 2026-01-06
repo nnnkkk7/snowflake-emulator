@@ -2,6 +2,8 @@
   <img src="assets/snowflake-emulator.png" alt="snowflake-emulator" width="360" />
 </p>
 
+The Go gopher was designed by the awesome [Renee French](https://reneefrench.blogspot.com/)
+
 # Snowflake Emulator
 
 A lightweight, open-source Snowflake emulator built with Go and DuckDB, designed for local development and testing.
