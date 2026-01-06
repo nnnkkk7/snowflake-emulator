@@ -1,6 +1,7 @@
 <p align="center">
   <img src="assets/snowflake-emulator.png" alt="snowflake-emulator" width="360" />
 </p>
+The Go gopher was designed by the awesome [Renee French](https://reneefrench.blogspot.com/).
 
 # Snowflake Emulator
 
