@@ -1,11 +1,11 @@
 module github.com/nnnkkk7/snowflake-emulator
 
-go 1.24.0
+go 1.25.6
 
 require (
 	github.com/blastrain/vitess-sqlparser v0.0.0-20201030050434-a139afbb1aba
 	github.com/duckdb/duckdb-go/v2 v2.5.4
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/snowflakedb/gosnowflake v1.18.1
