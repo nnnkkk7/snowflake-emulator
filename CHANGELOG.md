@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.9](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.8...v0.0.9) - 2026-01-19
+- chore: fix tagpr config by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/43
+
 ## [v0.0.8](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.7...v0.0.8) - 2026-01-19
 - refactor: update comments and test names for clarity and consistency by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/39
 - docs: add Go gopher design attribution by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/41
