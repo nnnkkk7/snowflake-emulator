@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.8](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.7...v0.0.8) - 2026-01-06
+- refactor: update comments and test names for clarity and consistency by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/39
+- docs: add Go gopher design attribution by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/41
+
 ## [v0.0.7](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.6...v0.0.7) - 2026-01-05
 - docs: update README.md to enhance clarity and structure by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/36
 - ci: fix release workflow by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/38
