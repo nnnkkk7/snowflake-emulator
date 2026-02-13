@@ -111,8 +111,8 @@ type QuerySuccessData struct {
 	QueryID           string           `json:"queryId"`
 	SQLState          string           `json:"sqlState,omitempty"`
 	StatementTypeID   int64            `json:"statementTypeId"`
-	RowType           []ColumnMetadata `json:"rowtype,omitempty"`
-	RowSet            [][]string       `json:"rowset,omitempty"`
+	RowType           []ColumnMetadata `json:"rowtype"`
+	RowSet            [][]string       `json:"rowset"`
 	Total             int64            `json:"total"`
 	Returned          int64            `json:"returned"`
 	QueryResultFormat string           `json:"queryResultFormat"`

@@ -128,12 +128,17 @@ func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, se
 	stmtTypeID := query.GetStatementTypeID(sqlText)
 
 	// Build success response
+	// RowType and RowSet must be non-nil (empty arrays) even for DDL/DML statements.
+	// The Snowflake .NET driver expects these fields to always be present;
+	// omitting them causes a NullReferenceException in ResultSetUtil.IsDQL.
 	resp := types.QueryResponse{
 		Success: true,
 		Data: &types.QuerySuccessData{
 			QueryID:           queryID,
 			SQLState:          apierror.SQLStateSuccess,
 			StatementTypeID:   int64(stmtTypeID),
+			RowType:           []types.ColumnMetadata{},
+			RowSet:            [][]string{},
 			Total:             result.RowsAffected,
 			Returned:          0,
 			QueryResultFormat: config.QueryResultFormatJSON,
