@@ -49,15 +49,16 @@ func main() {
 	}
 	fmt.Println("Connected to Snowflake Emulator!")
 
-	// Create a sample table
+	// Create a sample table using Snowflake-native types
+	// The emulator translates these to DuckDB equivalents automatically
 	fmt.Println("\n=== Creating table ===")
 	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER,
-			name VARCHAR,
-			email VARCHAR,
-			score INTEGER,
-			created_at DATE
+			id NUMBER,
+			name TEXT,
+			email STRING,
+			score NUMBER,
+			created_at TIMESTAMP_NTZ
 		)
 	`)
 	if err != nil {
@@ -161,6 +162,19 @@ func main() {
 			NVL2(score, IFF(score >= 90, 'A', 'B'), 'N/A') AS grade
 		FROM users
 		ORDER BY id
+	`)
+	if err != nil {
+		log.Fatalf("Query failed: %v", err)
+	}
+	printRows(rows)
+
+	// Example 8: INFORMATION_SCHEMA query
+	fmt.Println("\n8. INFORMATION_SCHEMA (system table query):")
+	rows, err = db.QueryContext(ctx, `
+		SELECT TABLE_NAME, TABLE_TYPE
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = 'main'
+		ORDER BY TABLE_NAME
 	`)
 	if err != nil {
 		log.Fatalf("Query failed: %v", err)

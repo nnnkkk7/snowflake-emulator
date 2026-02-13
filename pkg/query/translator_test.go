@@ -1075,6 +1075,361 @@ func TestTranslator_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestTranslator_InformationSchema tests that INFORMATION_SCHEMA queries work correctly.
+// vitess-sqlparser adds backticks around reserved words like "tables" and "columns",
+// which DuckDB rejects. The translator must strip them.
+func TestTranslator_InformationSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "SelectAllFromInformationSchemaTables",
+			input:    "SELECT * FROM INFORMATION_SCHEMA.TABLES",
+			expected: "select * from INFORMATION_SCHEMA.tables",
+		},
+		{
+			name:     "SelectColumnsFromInformationSchemaTables",
+			input:    "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC'",
+			expected: "select TABLE_NAME, TABLE_TYPE from INFORMATION_SCHEMA.tables where TABLE_SCHEMA = 'PUBLIC'",
+		},
+		{
+			name:     "InformationSchemaColumns",
+			input:    "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'USERS'",
+			expected: "select COLUMN_NAME, DATA_TYPE from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME = 'USERS'",
+		},
+		{
+			name:     "InformationSchemaSchemata",
+			input:    "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA",
+			expected: "select SCHEMA_NAME from INFORMATION_SCHEMA.SCHEMATA",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Translate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if diff := cmp.Diff(tt.expected, result); diff != "" {
+					t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+// TestTranslator_TypeTranslation_DDL tests type translation in CREATE TABLE statements.
+func TestTranslator_TypeTranslation_DDL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "CreateTableWithSnowflakeTypes",
+			input:    "CREATE TABLE foo (col1 NUMBER, col2 TEXT, col3 TIMESTAMP_NTZ)",
+			expected: "CREATE TABLE foo (col1 NUMERIC, col2 VARCHAR, col3 TIMESTAMP)",
+		},
+		{
+			name:     "CreateTableWithTimestampVariants",
+			input:    "CREATE TABLE foo (ts1 TIMESTAMP_NTZ, ts2 TIMESTAMP_LTZ, ts3 TIMESTAMP_TZ)",
+			expected: "CREATE TABLE foo (ts1 TIMESTAMP, ts2 TIMESTAMPTZ, ts3 TIMESTAMPTZ)",
+		},
+		{
+			name:     "CreateTableWithSemiStructured",
+			input:    "CREATE TABLE foo (data VARIANT, meta OBJECT, items ARRAY)",
+			expected: "CREATE TABLE foo (data JSON, meta JSON, items JSON)",
+		},
+		{
+			name:     "CreateTableWithStringTypes",
+			input:    "CREATE TABLE foo (a STRING, b TEXT, c CHAR, d CHARACTER)",
+			expected: "CREATE TABLE foo (a VARCHAR, b VARCHAR, c VARCHAR, d VARCHAR)",
+		},
+		{
+			name:     "CreateTableWithBinaryTypes",
+			input:    "CREATE TABLE foo (a BINARY, b VARBINARY)",
+			expected: "CREATE TABLE foo (a BLOB, b BLOB)",
+		},
+		{
+			name:     "CreateTableWithFloatTypes",
+			input:    "CREATE TABLE foo (a FLOAT4, b FLOAT8)",
+			expected: "CREATE TABLE foo (a FLOAT, b DOUBLE)",
+		},
+		{
+			name:     "CreateTableWithByteint",
+			input:    "CREATE TABLE foo (a BYTEINT)",
+			expected: "CREATE TABLE foo (a TINYINT)",
+		},
+		{
+			name:     "CreateTableWithDatetime",
+			input:    "CREATE TABLE foo (a DATETIME)",
+			expected: "CREATE TABLE foo (a TIMESTAMP)",
+		},
+		{
+			name:     "CreateTableWithParameterizedTypes",
+			input:    "CREATE TABLE foo (a NUMBER(10,2), b TEXT)",
+			expected: "CREATE TABLE foo (a NUMERIC(10,2), b VARCHAR)",
+		},
+		{
+			name:     "CreateTablePreservesDuckDBTypes",
+			input:    "CREATE TABLE foo (a INTEGER, b VARCHAR, c BOOLEAN, d DATE)",
+			expected: "CREATE TABLE foo (a INTEGER, b VARCHAR, c BOOLEAN, d DATE)",
+		},
+		{
+			name:     "CreateTableCaseInsensitive",
+			input:    "CREATE TABLE foo (a number, b text, c timestamp_ntz)",
+			expected: "CREATE TABLE foo (a NUMERIC, b VARCHAR, c TIMESTAMP)",
+		},
+		{
+			name:     "CreateTableIfNotExists",
+			input:    "CREATE TABLE IF NOT EXISTS foo (id NUMBER, name TEXT)",
+			expected: "CREATE TABLE IF NOT EXISTS foo (id NUMERIC, name VARCHAR)",
+		},
+		{
+			name:     "CreateTableMixedTypes",
+			input:    "CREATE TABLE foo (id NUMBER, name TEXT, ts TIMESTAMP_NTZ, tz TIMESTAMP_TZ, data VARIANT)",
+			expected: "CREATE TABLE foo (id NUMERIC, name VARCHAR, ts TIMESTAMP, tz TIMESTAMPTZ, data JSON)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Translate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if diff := cmp.Diff(tt.expected, result); diff != "" {
+					t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+// TestTranslator_TypeTranslation_CAST tests type translation in CAST expressions.
+// Note: vitess-sqlparser converts CAST(x AS type) to convert(x, type) syntax,
+// but the type name translation still applies correctly.
+func TestTranslator_TypeTranslation_CAST(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "CastToNumber",
+			input:    "SELECT CAST('123' AS NUMBER)",
+			expected: "select convert('123', NUMERIC)",
+		},
+		{
+			name:     "CastToText",
+			input:    "SELECT CAST(123 AS TEXT)",
+			expected: "select convert(123, VARCHAR)",
+		},
+		{
+			name:     "CastToTimestampNTZ",
+			input:    "SELECT CAST(col AS TIMESTAMP_NTZ)",
+			expected: "select convert(col, TIMESTAMP)",
+		},
+		{
+			name:     "CastToVariant",
+			input:    "SELECT CAST(col AS VARIANT)",
+			expected: "select convert(col, JSON)",
+		},
+		{
+			name:     "MultipleCasts",
+			input:    "SELECT CAST(a AS NUMBER), CAST(b AS TEXT) FROM test",
+			expected: "select convert(a, NUMERIC), convert(b, VARCHAR) from test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Translate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if diff := cmp.Diff(tt.expected, result); diff != "" {
+					t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+// TestTranslator_TypeTranslation_ALTER tests type translation in ALTER TABLE statements.
+func TestTranslator_TypeTranslation_ALTER(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "AlterTableAddColumn",
+			input:    "ALTER TABLE foo ADD COLUMN data VARIANT",
+			expected: "ALTER TABLE foo ADD COLUMN data JSON",
+		},
+		{
+			name:     "AlterTableAddColumnNumber",
+			input:    "ALTER TABLE foo ADD COLUMN score NUMBER",
+			expected: "ALTER TABLE foo ADD COLUMN score NUMERIC",
+		},
+		{
+			name:     "AlterTableAddColumnTimestamp",
+			input:    "ALTER TABLE foo ADD COLUMN ts TIMESTAMP_NTZ",
+			expected: "ALTER TABLE foo ADD COLUMN ts TIMESTAMP",
+		},
+		{
+			name:     "AlterTableModifyColumn",
+			input:    "ALTER TABLE foo MODIFY COLUMN name TEXT",
+			expected: "ALTER TABLE foo MODIFY COLUMN name VARCHAR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Translate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if diff := cmp.Diff(tt.expected, result); diff != "" {
+					t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+// TestTranslator_TypeTranslation_EdgeCases tests edge cases in type translation.
+func TestTranslator_TypeTranslation_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "TypeInsideStringLiteral_NotReplaced",
+			input:    "CREATE TABLE foo (name VARCHAR DEFAULT 'TEXT')",
+			expected: "CREATE TABLE foo (name VARCHAR DEFAULT 'TEXT')",
+		},
+		{
+			name:     "TypeInsideStringLiteral_Number",
+			input:    "CREATE TABLE foo (name VARCHAR DEFAULT 'NUMBER')",
+			expected: "CREATE TABLE foo (name VARCHAR DEFAULT 'NUMBER')",
+		},
+		{
+			name:     "ColumnNameContainingTypeName",
+			input:    "CREATE TABLE foo (text_column VARCHAR, number_value INTEGER)",
+			expected: "CREATE TABLE foo (text_column VARCHAR, number_value INTEGER)",
+		},
+		{
+			name:     "VarcharNotAffected",
+			input:    "CREATE TABLE foo (a VARCHAR(100), b VARCHAR)",
+			expected: "CREATE TABLE foo (a VARCHAR(100), b VARCHAR)",
+		},
+		{
+			name:     "TimestampNotAffected_WhenBare",
+			input:    "CREATE TABLE foo (a TIMESTAMP)",
+			expected: "CREATE TABLE foo (a TIMESTAMP)",
+		},
+		{
+			name:     "ObjectConstructNotAffected",
+			input:    "CREATE TABLE foo (obj_construct_col VARCHAR)",
+			expected: "CREATE TABLE foo (obj_construct_col VARCHAR)",
+		},
+		{
+			name:     "MultipleStringLiterals",
+			input:    "CREATE TABLE foo (a TEXT DEFAULT 'TEXT', b NUMBER DEFAULT 'NUMBER')",
+			expected: "CREATE TABLE foo (a VARCHAR DEFAULT 'TEXT', b NUMERIC DEFAULT 'NUMBER')",
+		},
+		{
+			name:     "DropTablePassthrough",
+			input:    "DROP TABLE IF EXISTS foo",
+			expected: "DROP TABLE IF EXISTS foo",
+		},
+		// DML edge cases: type names in non-type contexts should NOT be replaced
+		{
+			name:     "DML_StringLiteralInWhere_TEXT",
+			input:    "SELECT * FROM foo WHERE category = 'TEXT'",
+			expected: "select * from foo where category = 'TEXT'",
+		},
+		{
+			name:     "DML_StringLiteralInWhere_NUMBER",
+			input:    "SELECT * FROM foo WHERE type = 'NUMBER'",
+			expected: "select * from foo where type = 'NUMBER'",
+		},
+		{
+			name:     "DML_StringLiteralInWhere_VARIANT",
+			input:    "SELECT * FROM foo WHERE kind = 'VARIANT'",
+			expected: "select * from foo where kind = 'VARIANT'",
+		},
+		{
+			name:     "DML_ColumnNamedText",
+			input:    "SELECT text FROM documents WHERE id = 1",
+			expected: "select text from documents where id = 1",
+		},
+		{
+			name:     "DML_ColumnNamedNumber",
+			input:    "SELECT number FROM items WHERE active = true",
+			expected: "select number from items where active = true",
+		},
+		{
+			name:     "DML_ColumnAliasMatchingType",
+			input:    "SELECT name AS text FROM users",
+			expected: "select name as text from users",
+		},
+		{
+			name:     "DML_TypeNameInFunctionArg",
+			input:    "SELECT UPPER(text) FROM documents",
+			expected: "select UPPER(text) from documents",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Translate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if diff := cmp.Diff(tt.expected, result); diff != "" {
+					t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
 // normalizeWhitespace removes extra whitespace and newlines for comparison.
 func normalizeWhitespace(s string) string {
 	// Simple normalization: replace multiple whitespace with single space

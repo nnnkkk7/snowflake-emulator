@@ -96,7 +96,7 @@ func TestQueryResponseJSON(t *testing.T) {
 			SQLState:        "00000",
 			StatementTypeID: 1,
 			RowType: []ColumnMetadata{
-				{Name: "ID", Type: "NUMBER", Nullable: false},
+				{Name: "ID", Type: "FIXED", Nullable: false},
 				{Name: "NAME", Type: "TEXT", Nullable: true},
 			},
 			RowSet: [][]string{
