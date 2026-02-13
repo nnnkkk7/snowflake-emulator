@@ -168,6 +168,19 @@ func main() {
 	}
 	printRows(rows)
 
+	// Example 8: INFORMATION_SCHEMA query
+	fmt.Println("\n8. INFORMATION_SCHEMA (system table query):")
+	rows, err = db.QueryContext(ctx, `
+		SELECT TABLE_NAME, TABLE_TYPE
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = 'main'
+		ORDER BY TABLE_NAME
+	`)
+	if err != nil {
+		log.Fatalf("Query failed: %v", err)
+	}
+	printRows(rows)
+
 	// Clean up
 	fmt.Println("\n=== Cleanup ===")
 	_, err = db.ExecContext(ctx, "DROP TABLE IF EXISTS users")

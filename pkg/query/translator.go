@@ -171,6 +171,11 @@ func (t *Translator) Translate(sql string) (string, error) {
 // handleComplexTransformations handles transformations that require more than simple renames.
 // This handles marked functions and CURRENT_TIMESTAMP/CURRENT_DATE.
 func (t *Translator) handleComplexTransformations(sql string) string {
+	// Remove backticks added by vitess-sqlparser (MySQL-style quoting, not valid in DuckDB)
+	// This fixes queries against system tables like INFORMATION_SCHEMA.TABLES where the
+	// parser backtick-quotes reserved words (e.g., `tables`)
+	sql = strings.ReplaceAll(sql, "`", "")
+
 	// Remove "from dual" added by vitess-sqlparser (Oracle-style, not needed in DuckDB)
 	sql = removeDualSuffix(sql)
 
