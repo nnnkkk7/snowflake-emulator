@@ -108,14 +108,15 @@ func main() {
 	// Example 3: Execute SQL statements
 	fmt.Println("\n3. Executing SQL statements...")
 
-	// Create table
+	// Create table using Snowflake-native types
+	// The emulator translates these to DuckDB equivalents automatically
 	fmt.Println("\n   Creating table 'products'...")
 	resp, err := executeStatement(`
 		CREATE TABLE IF NOT EXISTS products (
-			id INTEGER,
-			name VARCHAR,
+			id NUMBER,
+			name TEXT,
 			price DECIMAL(10,2),
-			category VARCHAR,
+			category STRING,
 			in_stock BOOLEAN
 		)
 	`, "DEMO_DB", "PUBLIC")

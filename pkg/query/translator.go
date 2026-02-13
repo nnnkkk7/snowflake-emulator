@@ -2,14 +2,22 @@ package query
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/blastrain/vitess-sqlparser/sqlparser"
 )
 
+// typeMappingEntry represents a Snowflake to DuckDB type name mapping.
+type typeMappingEntry struct {
+	from string // Snowflake type name (uppercase)
+	to   string // DuckDB type name
+}
+
 // Translator converts Snowflake SQL to DuckDB-compatible SQL using AST manipulation.
 type Translator struct {
-	functionMap map[string]FunctionTranslator
+	functionMap  map[string]FunctionTranslator
+	typeMappings []typeMappingEntry
 }
 
 // FunctionTranslator defines how to translate a specific function.
@@ -24,6 +32,7 @@ func NewTranslator() *Translator {
 		functionMap: make(map[string]FunctionTranslator),
 	}
 	t.registerFunctions()
+	t.registerTypeMappings()
 	return t
 }
 
@@ -102,13 +111,17 @@ func (t *Translator) Translate(sql string) (string, error) {
 	// Trim whitespace
 	sql = strings.TrimSpace(sql)
 
-	// Skip AST transformation for DDL statements - they don't need function translation
-	// and the sqlparser adds unwanted backticks when serializing back to string
-	// Also skip SHOW/DESCRIBE/EXPLAIN which cause vitess-sqlparser to panic
+	// DDL statements with type names - translate Snowflake types but skip AST parsing
+	// (sqlparser adds unwanted backticks when serializing DDL back to string)
 	upperSQL := strings.ToUpper(sql)
 	if strings.HasPrefix(upperSQL, "CREATE ") ||
-		strings.HasPrefix(upperSQL, "DROP ") ||
-		strings.HasPrefix(upperSQL, "ALTER ") ||
+		strings.HasPrefix(upperSQL, "ALTER ") {
+		return t.translateDataTypes(sql), nil
+	}
+
+	// Other DDL/meta statements - pass through unchanged
+	// SHOW/DESCRIBE/EXPLAIN cause vitess-sqlparser to panic
+	if strings.HasPrefix(upperSQL, "DROP ") ||
 		strings.HasPrefix(upperSQL, "TRUNCATE ") ||
 		strings.HasPrefix(upperSQL, "SHOW ") ||
 		strings.HasPrefix(upperSQL, "DESCRIBE ") ||
@@ -120,10 +133,9 @@ func (t *Translator) Translate(sql string) (string, error) {
 	// Parse the SQL statement into an AST
 	stmt, err := sqlparser.Parse(sql)
 	if err != nil {
-		// If parsing fails, return original SQL
+		// If parsing fails, still translate data types for graceful degradation
 		// DuckDB might handle some Snowflake syntax directly
-		// This provides graceful degradation for unsupported syntax
-		return sql, nil
+		return t.translateDataTypes(sql), nil
 	}
 
 	// Walk the AST and transform functions in-place
@@ -148,6 +160,10 @@ func (t *Translator) Translate(sql string) (string, error) {
 
 	// Apply post-processing for transformations that couldn't be done in-place
 	result = t.handleComplexTransformations(result)
+
+	// Translate Snowflake data types in CAST/convert expressions only
+	// (avoid replacing column names that happen to match type names like "text")
+	result = t.translateCastTypes(result)
 
 	return result, nil
 }
@@ -256,6 +272,204 @@ func removeDualSuffix(sql string) string {
 		return trimmed[:len(trimmed)-len(suffix)]
 	}
 	return sql
+}
+
+// registerTypeMappings populates the type mapping table, sorted by name length descending.
+// Longer type names are processed first to prevent partial matches
+// (e.g., TIMESTAMP_NTZ is replaced before TIMESTAMP).
+func (t *Translator) registerTypeMappings() {
+	mappings := []typeMappingEntry{
+		{"TIMESTAMP_NTZ", "TIMESTAMP"},
+		{"TIMESTAMP_LTZ", "TIMESTAMPTZ"},
+		{"TIMESTAMP_TZ", "TIMESTAMPTZ"},
+		{"CHARACTER", "VARCHAR"},
+		{"VARBINARY", "BLOB"},
+		{"DATETIME", "TIMESTAMP"},
+		{"BYTEINT", "TINYINT"},
+		{"VARIANT", "JSON"},
+		{"NUMBER", "NUMERIC"},
+		{"STRING", "VARCHAR"},
+		{"OBJECT", "JSON"},
+		{"BINARY", "BLOB"},
+		{"FLOAT4", "FLOAT"},
+		{"FLOAT8", "DOUBLE"},
+		{"ARRAY", "JSON"},
+		{"TEXT", "VARCHAR"},
+		{"CHAR", "VARCHAR"},
+	}
+
+	// Sort by from length descending to ensure longer types are replaced first
+	sort.Slice(mappings, func(i, j int) bool {
+		return len(mappings[i].from) > len(mappings[j].from)
+	})
+
+	t.typeMappings = mappings
+}
+
+// translateDataTypes replaces Snowflake type names with DuckDB equivalents in SQL text.
+// It protects string literals from replacement and uses word-boundary-aware matching.
+func (t *Translator) translateDataTypes(sql string) string {
+	// Protect string literals from replacement
+	protected, literals := protectStringLiterals(sql)
+
+	// Replace each Snowflake type with its DuckDB equivalent
+	for _, m := range t.typeMappings {
+		protected = replaceTypeWord(protected, m.from, m.to)
+	}
+
+	// Restore string literals
+	return restoreStringLiterals(protected, literals)
+}
+
+// translateCastTypes translates Snowflake type names only within convert() expressions.
+// vitess-sqlparser converts CAST(x AS TYPE) to convert(x, TYPE), so we target that pattern.
+// This avoids false positives where column names happen to match type names (e.g., "text").
+func (t *Translator) translateCastTypes(sql string) string {
+	// Find all convert( occurrences and translate the type argument
+	lower := strings.ToLower(sql)
+	result := strings.Builder{}
+	result.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		// Look for "convert(" case-insensitively
+		if i+8 <= len(sql) && lower[i:i+8] == "convert(" {
+			// Find the matching closing paren
+			start := i + 8
+			depth := 1
+			end := start
+			for end < len(sql) && depth > 0 {
+				switch sql[end] {
+				case '(':
+					depth++
+				case ')':
+					depth--
+				}
+				end++
+			}
+
+			if depth == 0 {
+				// args = everything between convert( and )
+				args := sql[start : end-1]
+				// Find the last comma (separating expr from type)
+				lastComma := strings.LastIndex(args, ",")
+				if lastComma >= 0 {
+					expr := args[:lastComma]
+					typePart := strings.TrimSpace(args[lastComma+1:])
+					// Translate the type name
+					translatedType := t.translateSingleType(typePart)
+					result.WriteString(sql[i : i+8])
+					result.WriteString(expr)
+					result.WriteString(", ")
+					result.WriteString(translatedType)
+					result.WriteByte(')')
+					i = end
+					continue
+				}
+			}
+		}
+
+		result.WriteByte(sql[i])
+		i++
+	}
+	return result.String()
+}
+
+// translateSingleType translates a single type name (case-insensitive).
+func (t *Translator) translateSingleType(typeName string) string {
+	upper := strings.ToUpper(strings.TrimSpace(typeName))
+	for _, m := range t.typeMappings {
+		if upper == m.from {
+			return m.to
+		}
+	}
+	return typeName
+}
+
+// protectStringLiterals replaces single-quoted string literals with placeholders
+// to prevent type name replacement inside strings.
+func protectStringLiterals(sql string) (string, []string) {
+	var literals []string
+	var result strings.Builder
+	result.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		if sql[i] == '\'' {
+			// Find the end of the string literal (handle escaped quotes '')
+			j := i + 1
+			for j < len(sql) {
+				if sql[j] == '\'' {
+					if j+1 < len(sql) && sql[j+1] == '\'' {
+						j += 2 // Skip escaped quote
+					} else {
+						j++ // End of literal
+						break
+					}
+				} else {
+					j++
+				}
+			}
+			literal := sql[i:j]
+			placeholder := fmt.Sprintf("__STRLIT_%d__", len(literals))
+			literals = append(literals, literal)
+			result.WriteString(placeholder)
+			i = j
+		} else {
+			result.WriteByte(sql[i])
+			i++
+		}
+	}
+	return result.String(), literals
+}
+
+// restoreStringLiterals replaces placeholders with the original string literals.
+func restoreStringLiterals(sql string, literals []string) string {
+	for i, lit := range literals {
+		placeholder := fmt.Sprintf("__STRLIT_%d__", i)
+		sql = strings.Replace(sql, placeholder, lit, 1)
+	}
+	return sql
+}
+
+// replaceTypeWord replaces all occurrences of a type name as a whole word (case-insensitive).
+// Word boundaries are defined by non-word characters (anything not a letter, digit, or underscore).
+func replaceTypeWord(sql, from, to string) string {
+	fromUpper := strings.ToUpper(from)
+	fromLen := len(from)
+	var result strings.Builder
+	result.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		// Check if we have enough characters remaining
+		if i+fromLen > len(sql) {
+			result.WriteString(sql[i:])
+			break
+		}
+
+		// Case-insensitive comparison at current position
+		if strings.EqualFold(sql[i:i+fromLen], fromUpper) {
+			// Check word boundaries
+			leftOK := i == 0 || !isWordChar(sql[i-1])
+			rightOK := i+fromLen >= len(sql) || !isWordChar(sql[i+fromLen])
+
+			if leftOK && rightOK {
+				result.WriteString(to)
+				i += fromLen
+				continue
+			}
+		}
+
+		result.WriteByte(sql[i])
+		i++
+	}
+	return result.String()
+}
+
+// isWordChar returns true if the byte is a word character (letter, digit, or underscore).
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // splitFunctionArgs splits function arguments respecting parentheses nesting.
