@@ -504,6 +504,43 @@ func TestQueryHandler_CreateDatabase(t *testing.T) {
 			t.Errorf("Expected database name REPLACE_DB, got %s", db.Name)
 		}
 	})
+
+	t.Run("CreateDatabaseWithFollowingStatements", func(t *testing.T) {
+		// Multi-statement SQL: CREATE DATABASE followed by CREATE TABLE
+		// This mirrors how Aspire sends creation scripts as a single batch
+		multiSQL := "CREATE OR REPLACE DATABASE MULTI_DB;\n" +
+			"CREATE TABLE test_multi (id INTEGER, name VARCHAR);\n" +
+			"INSERT INTO test_multi VALUES (1, 'hello');"
+		resp := executeSQL(t, multiSQL)
+		if !resp.Success {
+			t.Fatalf("Expected success on multi-statement CREATE DATABASE, got failure: %s", resp.Message)
+		}
+
+		// Verify database was created
+		db, err := repo.GetDatabaseByName(ctx, "MULTI_DB")
+		if err != nil {
+			t.Fatalf("Database not found in metadata: %v", err)
+		}
+		if db.Name != "MULTI_DB" {
+			t.Errorf("Expected database name MULTI_DB, got %s", db.Name)
+		}
+	})
+
+	t.Run("CreateDatabaseIfNotExistsWithFollowingStatements", func(t *testing.T) {
+		// Create the database first
+		resp := executeSQL(t, "CREATE DATABASE MULTI_IFNE_DB")
+		if !resp.Success {
+			t.Fatalf("Expected success on first create, got failure: %s", resp.Message)
+		}
+
+		// IF NOT EXISTS with following statements should skip creation but still run the rest
+		multiSQL := "CREATE DATABASE IF NOT EXISTS MULTI_IFNE_DB;\n" +
+			"CREATE TABLE test_ifne (id INTEGER);"
+		resp = executeSQL(t, multiSQL)
+		if !resp.Success {
+			t.Errorf("Expected success on IF NOT EXISTS with following statements, got failure: %s", resp.Message)
+		}
+	})
 }
 
 // TestQueryHandler_QueryResultFormat tests the format of query results.

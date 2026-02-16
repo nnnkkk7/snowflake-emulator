@@ -928,6 +928,26 @@ func TestGosnowflake_AllSQLOperations(t *testing.T) {
 			t.Fatalf("CREATE OR REPLACE DATABASE failed: %v", err)
 		}
 		t.Log("CREATE OR REPLACE DATABASE: OK")
+
+		// Multi-statement: CREATE DATABASE followed by schema/table creation
+		// This mirrors how creation scripts are sent as a single batch
+		_, err = db.ExecContext(ctx, `CREATE OR REPLACE DATABASE e2e_multi_db;
+CREATE TABLE e2e_multi_table (id INTEGER, name VARCHAR);
+INSERT INTO e2e_multi_table VALUES (1, 'test');`)
+		if err != nil {
+			t.Fatalf("CREATE DATABASE with following statements failed: %v", err)
+		}
+
+		// Verify the table was created by querying it
+		var name string
+		err = db.QueryRowContext(ctx, `SELECT name FROM e2e_multi_table WHERE id = 1`).Scan(&name)
+		if err != nil {
+			t.Fatalf("Failed to query table created after CREATE DATABASE: %v", err)
+		}
+		if name != "test" {
+			t.Errorf("Expected 'test', got %q", name)
+		}
+		t.Log("CREATE DATABASE with following statements: OK")
 	})
 
 	// Final cleanup

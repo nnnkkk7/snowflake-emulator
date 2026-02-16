@@ -405,6 +405,8 @@ func (e *Executor) executeDropTable(ctx context.Context, sql string) (*ExecResul
 }
 
 // executeCreateDatabase handles CREATE DATABASE statements by routing through the metadata repository.
+// If the SQL contains additional statements after the CREATE DATABASE (separated by semicolons),
+// the remaining statements are passed through to executeRaw() so DuckDB can handle them.
 func (e *Executor) executeCreateDatabase(ctx context.Context, sql string) (*ExecResult, error) {
 	matches := createDatabaseRegex.FindStringSubmatch(sql)
 	if matches == nil {
@@ -424,15 +426,31 @@ func (e *Executor) executeCreateDatabase(ctx context.Context, sql string) (*Exec
 			}
 		}
 	} else if ifNotExists {
-		// Check if database already exists; if so, return success (no-op)
+		// Check if database already exists; if so, no-op for this statement
+		// but still execute remaining statements if present
 		existing, err := e.repo.GetDatabaseByName(ctx, dbName)
 		if err == nil && existing != nil {
-			return &ExecResult{RowsAffected: 0}, nil
+			// Skip creation, but fall through to handle remaining SQL
+			goto handleRemaining
 		}
 	}
 
 	if _, err := e.repo.CreateDatabase(ctx, dbName, ""); err != nil {
 		return nil, fmt.Errorf("failed to create database: %w", err)
+	}
+
+handleRemaining:
+	// If there are additional statements after the CREATE DATABASE, execute them via DuckDB.
+	// Find the end of the matched CREATE DATABASE statement and check for remaining SQL.
+	matchEnd := strings.Index(sql, matches[3]) + len(matches[3])
+	remaining := strings.TrimSpace(sql[matchEnd:])
+	if len(remaining) > 0 && remaining[0] == ';' {
+		remaining = strings.TrimSpace(remaining[1:])
+	}
+	if remaining != "" {
+		if _, err := e.executeRaw(ctx, remaining); err != nil {
+			return nil, fmt.Errorf("failed to execute statements after CREATE DATABASE: %w", err)
+		}
 	}
 
 	return &ExecResult{RowsAffected: 0}, nil
