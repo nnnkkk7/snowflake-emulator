@@ -152,6 +152,14 @@ func (c *Classifier) IsCreateTable(sql string) bool {
 	return strings.HasPrefix(upperSQL, "CREATE TABLE")
 }
 
+// IsCreateDatabase checks if the SQL is a CREATE DATABASE statement.
+// Matches: CREATE DATABASE, CREATE OR REPLACE DATABASE, CREATE DATABASE IF NOT EXISTS.
+func (c *Classifier) IsCreateDatabase(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "CREATE DATABASE") ||
+		strings.HasPrefix(upperSQL, "CREATE OR REPLACE DATABASE")
+}
+
 // IsDropTable checks if the SQL is a DROP TABLE statement.
 func (c *Classifier) IsDropTable(sql string) bool {
 	upperSQL := strings.ToUpper(strings.TrimSpace(sql))

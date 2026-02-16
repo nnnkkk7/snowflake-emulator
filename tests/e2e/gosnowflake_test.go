@@ -899,6 +899,37 @@ func TestGosnowflake_AllSQLOperations(t *testing.T) {
 		t.Log("DROP SCHEMA: OK")
 	})
 
+	// ===== DDL: CREATE DATABASE =====
+	t.Run("DDL_CREATE_DATABASE", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `CREATE DATABASE e2e_test_db`)
+		if err != nil {
+			t.Fatalf("CREATE DATABASE failed: %v", err)
+		}
+		t.Log("CREATE DATABASE: OK")
+
+		// Plain CREATE DATABASE on existing database should fail
+		_, err = db.ExecContext(ctx, `CREATE DATABASE e2e_test_db`)
+		if err == nil {
+			t.Error("Expected error creating database that already exists, got nil")
+		} else {
+			t.Log("CREATE DATABASE (already exists) correctly returned error")
+		}
+
+		// IF NOT EXISTS on existing database should succeed (no-op)
+		_, err = db.ExecContext(ctx, `CREATE DATABASE IF NOT EXISTS e2e_test_db`)
+		if err != nil {
+			t.Fatalf("CREATE DATABASE IF NOT EXISTS failed: %v", err)
+		}
+		t.Log("CREATE DATABASE IF NOT EXISTS: OK")
+
+		// OR REPLACE on existing database should succeed
+		_, err = db.ExecContext(ctx, `CREATE OR REPLACE DATABASE e2e_test_db`)
+		if err != nil {
+			t.Fatalf("CREATE OR REPLACE DATABASE failed: %v", err)
+		}
+		t.Log("CREATE OR REPLACE DATABASE: OK")
+	})
+
 	// Final cleanup
 	t.Run("Cleanup", func(t *testing.T) {
 		_, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS test_operations`)

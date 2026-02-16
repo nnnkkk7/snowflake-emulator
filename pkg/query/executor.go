@@ -22,6 +22,9 @@ var (
 	timeRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d+)?$`)
 	// Timestamp format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS with optional timezone
 	timestampRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$`)
+
+	// CREATE DATABASE regex: captures OR REPLACE, IF NOT EXISTS, and database name
+	createDatabaseRegex = regexp.MustCompile(`(?i)^\s*CREATE\s+(OR\s+REPLACE\s+)?DATABASE\s+(IF\s+NOT\s+EXISTS\s+)?(\w+)`)
 )
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
@@ -300,6 +303,11 @@ func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error)
 	// Use classifier to detect DDL statements that need metadata tracking
 	classifier := NewClassifier()
 
+	// For CREATE DATABASE, route through metadata repository
+	if classifier.IsCreateDatabase(sql) {
+		return e.executeCreateDatabase(ctx, sql)
+	}
+
 	// For CREATE TABLE, we need to register it in metadata
 	if classifier.IsCreateTable(sql) {
 		return e.executeCreateTable(ctx, sql)
@@ -394,6 +402,40 @@ func (e *Executor) executeDropTable(ctx context.Context, sql string) (*ExecResul
 	return &ExecResult{
 		RowsAffected: 0,
 	}, nil
+}
+
+// executeCreateDatabase handles CREATE DATABASE statements by routing through the metadata repository.
+func (e *Executor) executeCreateDatabase(ctx context.Context, sql string) (*ExecResult, error) {
+	matches := createDatabaseRegex.FindStringSubmatch(sql)
+	if matches == nil {
+		return nil, fmt.Errorf("failed to parse CREATE DATABASE statement: %s", sql)
+	}
+
+	orReplace := strings.TrimSpace(matches[1]) != ""
+	ifNotExists := strings.TrimSpace(matches[2]) != ""
+	dbName := matches[3]
+
+	if orReplace {
+		// Drop existing database if it exists, then create
+		existing, err := e.repo.GetDatabaseByName(ctx, dbName)
+		if err == nil && existing != nil {
+			if dropErr := e.repo.DropDatabase(ctx, existing.ID); dropErr != nil {
+				return nil, fmt.Errorf("failed to drop existing database for OR REPLACE: %w", dropErr)
+			}
+		}
+	} else if ifNotExists {
+		// Check if database already exists; if so, return success (no-op)
+		existing, err := e.repo.GetDatabaseByName(ctx, dbName)
+		if err == nil && existing != nil {
+			return &ExecResult{RowsAffected: 0}, nil
+		}
+	}
+
+	if _, err := e.repo.CreateDatabase(ctx, dbName, ""); err != nil {
+		return nil, fmt.Errorf("failed to create database: %w", err)
+	}
+
+	return &ExecResult{RowsAffected: 0}, nil
 }
 
 // executeTransaction handles transaction control statements (BEGIN, COMMIT, ROLLBACK).
