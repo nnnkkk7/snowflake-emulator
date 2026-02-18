@@ -1502,6 +1502,15 @@ func TestTranslator_TypeTranslation_EdgeCases(t *testing.T) {
 			input:    "DROP TABLE IF EXISTS foo",
 			expected: "DROP TABLE IF EXISTS foo",
 		},
+		{
+			name: "MultiStatement_DropThenCreateWithSnowflakeTypes",
+			input: "DROP SCHEMA IF EXISTS MY_SCHEMA CASCADE;\n" +
+				"CREATE SCHEMA MY_SCHEMA;\n" +
+				"CREATE TABLE MY_SCHEMA.MY_TABLE (ID NUMBER(38, 0) NOT NULL, NAME TEXT(100) NOT NULL, CREATED_AT TIMESTAMP_NTZ(9) NOT NULL);",
+			expected: "DROP SCHEMA IF EXISTS MY_SCHEMA CASCADE;\n" +
+				"CREATE SCHEMA MY_SCHEMA;\n" +
+				"CREATE TABLE MY_SCHEMA.MY_TABLE (ID NUMERIC(38, 0) NOT NULL, NAME VARCHAR(100) NOT NULL, CREATED_AT TIMESTAMP(9) NOT NULL);",
+		},
 		// DML edge cases: type names in non-type contexts should NOT be replaced
 		{
 			name:     "DML_StringLiteralInWhere_TEXT",

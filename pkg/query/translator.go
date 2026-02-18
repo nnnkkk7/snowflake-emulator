@@ -118,15 +118,17 @@ func (t *Translator) Translate(sql string) (string, error) {
 		return t.translateDataTypes(sql), nil
 	}
 
-	// Other DDL/meta statements - pass through unchanged
-	// SHOW/DESCRIBE/EXPLAIN cause vitess-sqlparser to panic
+	// Other DDL/meta statements - skip AST parsing but still translate data types.
+	// Multi-statement SQL (e.g., DROP SCHEMA ...; CREATE TABLE ...) may start with
+	// a DROP but contain CREATE TABLE statements with Snowflake types that need translation.
+	// SHOW/DESCRIBE/EXPLAIN cause vitess-sqlparser to panic, so we skip AST parsing.
 	if strings.HasPrefix(upperSQL, "DROP ") ||
 		strings.HasPrefix(upperSQL, "TRUNCATE ") ||
 		strings.HasPrefix(upperSQL, "SHOW ") ||
 		strings.HasPrefix(upperSQL, "DESCRIBE ") ||
 		strings.HasPrefix(upperSQL, "DESC ") ||
 		strings.HasPrefix(upperSQL, "EXPLAIN ") {
-		return sql, nil
+		return t.translateDataTypes(sql), nil
 	}
 
 	// Parse the SQL statement into an AST
