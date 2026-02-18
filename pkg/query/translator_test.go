@@ -1075,6 +1075,135 @@ func TestTranslator_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestTranslator_BacktickStripping tests that backtick-quoted identifiers from
+// vitess-sqlparser are correctly unwrapped, while backticks inside string literals
+// are preserved.
+func TestTranslator_BacktickStripping(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "BacktickInStringLiteral_Preserved",
+			input:    "SELECT * FROM foo WHERE name = 'has`backtick'",
+			expected: "select * from foo where name = 'has`backtick'",
+		},
+		{
+			name:     "BacktickInStringLiteral_Multiple",
+			input:    "SELECT * FROM foo WHERE a = '`one`' AND b = '`two`'",
+			expected: "select * from foo where a = '`one`' and b = '`two`'",
+		},
+		{
+			name:     "BacktickIdentifier_Unwrapped",
+			input:    "SELECT `id`, `name` FROM `users`",
+			// vitess-sqlparser lowercases reserved words and backtick-quotes them;
+			// after parsing and re-serializing, the backticks are stripped
+			expected: "select id, name from users",
+		},
+		{
+			name:     "MixedBackticksAndStringLiterals",
+			input:    "SELECT `col` FROM `tbl` WHERE val = 'has`tick'",
+			expected: "select col from tbl where val = 'has`tick'",
+		},
+		{
+			// vitess-sqlparser converts '' escaping to \' internally,
+			// so we verify backticks inside strings survive that transformation
+			name:     "EscapedQuoteInStringWithBacktick",
+			input:    "SELECT * FROM foo WHERE name = 'has `backticks`'",
+			expected: "select * from foo where name = 'has `backticks`'",
+		},
+		{
+			name:     "NoBackticks_Unchanged",
+			input:    "SELECT id, name FROM users WHERE active = true",
+			expected: "select id, name from users where active = true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			translator := NewTranslator()
+			result, err := translator.Translate(tt.input)
+			if err != nil {
+				t.Fatalf("Translate() unexpected error: %v", err)
+			}
+
+			if diff := cmp.Diff(tt.expected, result); diff != "" {
+				t.Errorf("Translate() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestStripBacktickIdentifiers tests the stripBacktickIdentifiers helper directly.
+func TestStripBacktickIdentifiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "SimpleBacktickIdentifier",
+			input:    "select * from `tables`",
+			expected: "select * from tables",
+		},
+		{
+			name:     "MultipleBacktickIdentifiers",
+			input:    "select `col1`, `col2` from `my_table`",
+			expected: "select col1, col2 from my_table",
+		},
+		{
+			name:     "BacktickInsideStringLiteral",
+			input:    "select * from foo where name = 'back`tick'",
+			expected: "select * from foo where name = 'back`tick'",
+		},
+		{
+			name:     "EscapedQuoteWithBacktick",
+			input:    "select * from foo where x = 'it''s `quoted`'",
+			expected: "select * from foo where x = 'it''s `quoted`'",
+		},
+		{
+			name:     "AdjacentStringAndBacktick",
+			input:    "select 'literal' as `alias`",
+			expected: "select 'literal' as alias",
+		},
+		{
+			name:     "NoBackticks",
+			input:    "select id from users",
+			expected: "select id from users",
+		},
+		{
+			name:     "EmptyString",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "UnmatchedBacktick",
+			input:    "select `unclosed from table",
+			expected: "select `unclosed from table",
+		},
+		{
+			name:     "EmptyBacktickPair",
+			input:    "select `` from foo",
+			expected: "select  from foo",
+		},
+		{
+			name:     "BacktickInDottedIdentifier",
+			input:    "select * from INFORMATION_SCHEMA.`tables`",
+			expected: "select * from INFORMATION_SCHEMA.tables",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripBacktickIdentifiers(tt.input)
+			if diff := cmp.Diff(tt.expected, result); diff != "" {
+				t.Errorf("stripBacktickIdentifiers() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // TestTranslator_InformationSchema tests that INFORMATION_SCHEMA queries work correctly.
 // vitess-sqlparser adds backticks around reserved words like "tables" and "columns",
 // which DuckDB rejects. The translator must strip them.

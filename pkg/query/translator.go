@@ -2,7 +2,6 @@ package query
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/blastrain/vitess-sqlparser/sqlparser"
@@ -171,10 +170,11 @@ func (t *Translator) Translate(sql string) (string, error) {
 // handleComplexTransformations handles transformations that require more than simple renames.
 // This handles marked functions and CURRENT_TIMESTAMP/CURRENT_DATE.
 func (t *Translator) handleComplexTransformations(sql string) string {
-	// Remove backticks added by vitess-sqlparser (MySQL-style quoting, not valid in DuckDB)
-	// This fixes queries against system tables like INFORMATION_SCHEMA.TABLES where the
-	// parser backtick-quotes reserved words (e.g., `tables`)
-	sql = strings.ReplaceAll(sql, "`", "")
+	// Strip backtick-quoted identifiers added by vitess-sqlparser (MySQL-style quoting).
+	// DuckDB does not support backtick quoting — it uses double-quotes for identifiers.
+	// We only unwrap `identifier` patterns rather than blindly removing all backticks,
+	// so that backticks inside string literals are preserved.
+	sql = stripBacktickIdentifiers(sql)
 
 	// Remove "from dual" added by vitess-sqlparser (Oracle-style, not needed in DuckDB)
 	sql = removeDualSuffix(sql)
@@ -279,36 +279,37 @@ func removeDualSuffix(sql string) string {
 	return sql
 }
 
-// registerTypeMappings populates the type mapping table, sorted by name length descending.
-// Longer type names are processed first to prevent partial matches
+// registerTypeMappings populates the type mapping table.
+// Entries are ordered by name length descending to prevent partial matches
 // (e.g., TIMESTAMP_NTZ is replaced before TIMESTAMP).
 func (t *Translator) registerTypeMappings() {
-	mappings := []typeMappingEntry{
+	t.typeMappings = []typeMappingEntry{
+		// 13 chars
 		{"TIMESTAMP_NTZ", "TIMESTAMP"},
 		{"TIMESTAMP_LTZ", "TIMESTAMPTZ"},
+		// 12 chars
 		{"TIMESTAMP_TZ", "TIMESTAMPTZ"},
+		// 9 chars
 		{"CHARACTER", "VARCHAR"},
 		{"VARBINARY", "BLOB"},
+		// 8 chars
 		{"DATETIME", "TIMESTAMP"},
+		// 7 chars
 		{"BYTEINT", "TINYINT"},
 		{"VARIANT", "JSON"},
+		// 6 chars
 		{"NUMBER", "NUMERIC"},
 		{"STRING", "VARCHAR"},
 		{"OBJECT", "JSON"},
 		{"BINARY", "BLOB"},
 		{"FLOAT4", "FLOAT"},
 		{"FLOAT8", "DOUBLE"},
+		// 5 chars
 		{"ARRAY", "JSON"},
+		// 4 chars
 		{"TEXT", "VARCHAR"},
 		{"CHAR", "VARCHAR"},
 	}
-
-	// Sort by from length descending to ensure longer types are replaced first
-	sort.Slice(mappings, func(i, j int) bool {
-		return len(mappings[i].from) > len(mappings[j].from)
-	})
-
-	t.typeMappings = mappings
 }
 
 // translateDataTypes replaces Snowflake type names with DuckDB equivalents in SQL text.
@@ -475,6 +476,55 @@ func replaceTypeWord(sql, from, to string) string {
 // isWordChar returns true if the byte is a word character (letter, digit, or underscore).
 func isWordChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// stripBacktickIdentifiers removes backtick quoting from identifiers (e.g., `tables` → tables)
+// while preserving backticks that appear inside single-quoted string literals.
+func stripBacktickIdentifiers(sql string) string {
+	var result strings.Builder
+	result.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		switch sql[i] {
+		case '\'':
+			// Copy string literal verbatim (including any backticks inside)
+			j := i + 1
+			for j < len(sql) {
+				if sql[j] == '\'' {
+					if j+1 < len(sql) && sql[j+1] == '\'' {
+						j += 2 // escaped quote
+					} else {
+						j++ // end of literal
+						break
+					}
+				} else {
+					j++
+				}
+			}
+			result.WriteString(sql[i:j])
+			i = j
+		case '`':
+			// Find closing backtick and unwrap the identifier
+			j := i + 1
+			for j < len(sql) && sql[j] != '`' {
+				j++
+			}
+			if j < len(sql) {
+				// Write the identifier without backticks
+				result.WriteString(sql[i+1 : j])
+				i = j + 1
+			} else {
+				// No closing backtick found; write as-is
+				result.WriteByte(sql[i])
+				i++
+			}
+		default:
+			result.WriteByte(sql[i])
+			i++
+		}
+	}
+	return result.String()
 }
 
 // splitFunctionArgs splits function arguments respecting parentheses nesting.

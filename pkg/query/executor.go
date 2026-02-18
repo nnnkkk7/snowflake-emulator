@@ -32,6 +32,7 @@ type Executor struct {
 	mgr            *connection.Manager
 	repo           *metadata.Repository
 	translator     *Translator
+	classifier     *Classifier
 	copyProcessor  *CopyProcessor
 	mergeProcessor *MergeProcessor
 }
@@ -59,6 +60,7 @@ func NewExecutor(mgr *connection.Manager, repo *metadata.Repository, opts ...Exe
 		mgr:        mgr,
 		repo:       repo,
 		translator: NewTranslator(),
+		classifier: NewClassifier(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -300,21 +302,18 @@ func (e *Executor) ExecuteWithBindings(ctx context.Context, sql string, bindings
 
 // Execute executes a non-query SQL statement (INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
 func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error) {
-	// Use classifier to detect DDL statements that need metadata tracking
-	classifier := NewClassifier()
-
 	// For CREATE DATABASE, route through metadata repository
-	if classifier.IsCreateDatabase(sql) {
+	if e.classifier.IsCreateDatabase(sql) {
 		return e.executeCreateDatabase(ctx, sql)
 	}
 
 	// For CREATE TABLE, we need to register it in metadata
-	if classifier.IsCreateTable(sql) {
+	if e.classifier.IsCreateTable(sql) {
 		return e.executeCreateTable(ctx, sql)
 	}
 
 	// For DROP TABLE, we need to remove it from metadata
-	if classifier.IsDropTable(sql) {
+	if e.classifier.IsDropTable(sql) {
 		return e.executeDropTable(ctx, sql)
 	}
 
@@ -408,14 +407,17 @@ func (e *Executor) executeDropTable(ctx context.Context, sql string) (*ExecResul
 // If the SQL contains additional statements after the CREATE DATABASE (separated by semicolons),
 // the remaining statements are passed through to executeRaw() so DuckDB can handle them.
 func (e *Executor) executeCreateDatabase(ctx context.Context, sql string) (*ExecResult, error) {
-	matches := createDatabaseRegex.FindStringSubmatch(sql)
-	if matches == nil {
+	loc := createDatabaseRegex.FindStringSubmatchIndex(sql)
+	if loc == nil {
 		return nil, fmt.Errorf("failed to parse CREATE DATABASE statement: %s", sql)
 	}
 
-	orReplace := strings.TrimSpace(matches[1]) != ""
-	ifNotExists := strings.TrimSpace(matches[2]) != ""
+	matches := createDatabaseRegex.FindStringSubmatch(sql)
+	orReplace := matches[1] != ""
+	ifNotExists := matches[2] != ""
 	dbName := matches[3]
+
+	shouldCreate := true
 
 	if orReplace {
 		// Drop existing database if it exists, then create
@@ -426,23 +428,23 @@ func (e *Executor) executeCreateDatabase(ctx context.Context, sql string) (*Exec
 			}
 		}
 	} else if ifNotExists {
-		// Check if database already exists; if so, no-op for this statement
+		// Check if database already exists; if so, skip creation
 		// but still execute remaining statements if present
 		existing, err := e.repo.GetDatabaseByName(ctx, dbName)
 		if err == nil && existing != nil {
-			// Skip creation, but fall through to handle remaining SQL
-			goto handleRemaining
+			shouldCreate = false
 		}
 	}
 
-	if _, err := e.repo.CreateDatabase(ctx, dbName, ""); err != nil {
-		return nil, fmt.Errorf("failed to create database: %w", err)
+	if shouldCreate {
+		if _, err := e.repo.CreateDatabase(ctx, dbName, ""); err != nil {
+			return nil, fmt.Errorf("failed to create database: %w", err)
+		}
 	}
 
-handleRemaining:
 	// If there are additional statements after the CREATE DATABASE, execute them via DuckDB.
-	// Find the end of the matched CREATE DATABASE statement and check for remaining SQL.
-	matchEnd := strings.Index(sql, matches[3]) + len(matches[3])
+	// Use the submatch index for capture group 3 (database name) to find the end position.
+	matchEnd := loc[7] // end index of capture group 3
 	remaining := strings.TrimSpace(sql[matchEnd:])
 	if len(remaining) > 0 && remaining[0] == ';' {
 		remaining = strings.TrimSpace(remaining[1:])
