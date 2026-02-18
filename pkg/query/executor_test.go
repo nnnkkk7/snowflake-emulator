@@ -426,6 +426,34 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			bindings:     map[string]*QueryBindingValue{},
 			expectedRows: 1,
 		},
+		{
+			name: "NamedBindings",
+			sql:  "SELECT :p0 AS a, :p1 AS b, :p10 AS c, :foo AS d, :foo_bar AS e",
+			bindings: map[string]*QueryBindingValue{
+				"p0":      {Type: "FIXED", Value: "1"},
+				"p1":      {Type: "TEXT", Value: "hello"},
+				"p10":     {Type: "FIXED", Value: "99"},
+				"foo":     {Type: "TEXT", Value: "foo"},
+				"foo_bar": {Type: "TEXT", Value: "bar"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if len(rows[0]) != 5 {
+					t.Errorf("Expected 5 columns, got %d", len(rows[0]))
+				}
+				// Verify :p1 didn't corrupt :p10
+				if rows[0][2] != int64(99) && rows[0][2] != int32(99) {
+					t.Errorf("Expected 99 for :p10, got %v", rows[0][2])
+				}
+				// Verify :foo didn't corrupt :foo_bar
+				if rows[0][3] != "foo" {
+					t.Errorf("Expected 'foo' for :foo, got %v", rows[0][3])
+				}
+				if rows[0][4] != "bar" {
+					t.Errorf("Expected 'bar' for :foo_bar, got %v", rows[0][4])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

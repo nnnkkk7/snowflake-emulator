@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -147,35 +146,24 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 	return e.Query(ctx, boundSQL)
 }
 
-// applyBindings replaces :N placeholders with actual values from bindings.
-// Snowflake uses :1, :2, etc. for positional parameters.
+// applyBindings replaces :N or :name placeholders with actual values from bindings.
+// Snowflake uses :1, :2, etc. for positional parameters and :p0, :p1, etc. for named parameters.
+// Uses regex word-boundary matching to avoid partial replacements (e.g., :p1 inside :p10).
 func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
-	// Get binding keys sorted in descending order to avoid :1 replacing :10, :11, etc.
-	keys := make([]int, 0, len(bindings))
-	for k := range bindings {
-		pos, err := strconv.Atoi(k)
-		if err != nil {
-			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
-		}
-		keys = append(keys, pos)
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
-
 	result := sql
-	for _, pos := range keys {
-		key := strconv.Itoa(pos)
-		binding := bindings[key]
+
+	for key, binding := range bindings {
 		if binding == nil {
 			continue
 		}
-
-		placeholder := ":" + key
 		value, err := formatBindingValue(binding)
 		if err != nil {
 			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
 		}
-
-		result = strings.ReplaceAll(result, placeholder, value)
+		// Match :key only when not followed by a word character (letter, digit, underscore)
+		// This prevents :p1 from matching inside :p10
+		re := regexp.MustCompile(`:` + regexp.QuoteMeta(key) + `\b`)
+		result = re.ReplaceAllLiteralString(result, value)
 	}
 
 	// Also handle ? placeholders (positional, 1-based)
