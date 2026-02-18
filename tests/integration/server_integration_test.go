@@ -856,19 +856,19 @@ func TestIntegration_QueryHistory(t *testing.T) {
 	queryID3 := "query-003"
 
 	// Query 1: Successful SELECT
-	_, err = executor.QueryWithHistory(ctx, sessionID, queryID1, "SELECT 1 AS test")
+	_, err = executor.QueryWithHistory(ctx, sessionID, queryID1, "SELECT 1 AS test", nil)
 	if err != nil {
 		t.Fatalf("Query 1 failed: %v", err)
 	}
 
 	// Query 2: Successful DDL (use simple table name that DuckDB can handle)
-	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)")
+	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)", nil)
 	if err != nil {
 		t.Fatalf("Query 2 failed: %v", err)
 	}
 
 	// Query 3: Failed query
-	_, _ = executor.QueryWithHistory(ctx, sessionID, queryID3, "SELECT * FROM NONEXISTENT_TABLE")
+	_, _ = executor.QueryWithHistory(ctx, sessionID, queryID3, "SELECT * FROM NONEXISTENT_TABLE", nil)
 
 	// Verify history was recorded
 	history, err := repo.GetQueryHistory(ctx, 10)
@@ -909,6 +909,132 @@ func TestIntegration_QueryHistory(t *testing.T) {
 	}
 
 	t.Logf("Query history: %d entries (%d success, %d failed)", len(sessionHistory), successCount, failedCount)
+}
+
+// TestIntegration_BindingsViaQueryAPI tests that named bindings work end-to-end via the query API.
+func TestIntegration_BindingsViaQueryAPI(t *testing.T) {
+	server, _, _ := setupTestServer(t)
+
+	// Login
+	loginReq := map[string]interface{}{
+		"data": map[string]string{
+			"LOGIN_NAME":   "testuser",
+			"PASSWORD":     "testpass",
+			"databaseName": "TEST_DB",
+			"schemaName":   "PUBLIC",
+		},
+	}
+
+	body, _ := json.Marshal(loginReq)
+	resp, _ := http.Post(server.URL+"/session/v1/login-request", "application/json", bytes.NewReader(body))
+	var loginResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+	resp.Body.Close()
+
+	token := loginResp["data"].(map[string]interface{})["token"].(string)
+	authHeader := `Snowflake Token="` + token + `"`
+
+	// Test SELECT with named bindings
+	queryReq := map[string]interface{}{
+		"sqlText": "SELECT :foo AS col1, :foo_bar AS col2",
+		"bindings": map[string]interface{}{
+			"foo":     map[string]string{"type": "TEXT", "value": "hello"},
+			"foo_bar": map[string]string{"type": "TEXT", "value": "world"},
+		},
+	}
+	body, _ = json.Marshal(queryReq)
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Query request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var queryResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&queryResp)
+
+	if queryResp["success"] != true {
+		t.Fatalf("Expected success, got: %v", queryResp)
+	}
+
+	data := queryResp["data"].(map[string]interface{})
+	rowSet := data["rowset"].([]interface{})
+	if len(rowSet) != 1 {
+		t.Fatalf("Expected 1 row, got %d", len(rowSet))
+	}
+
+	row := rowSet[0].([]interface{})
+	if row[0] != "hello" {
+		t.Errorf("Expected 'hello' for :foo, got %v", row[0])
+	}
+	if row[1] != "world" {
+		t.Errorf("Expected 'world' for :foo_bar, got %v", row[1])
+	}
+
+	// Test DML with positional bindings
+	dmlReq := map[string]interface{}{
+		"sqlText": "CREATE TABLE binding_test (id INTEGER, name VARCHAR)",
+	}
+	body, _ = json.Marshal(dmlReq)
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader)
+	resp, _ = http.DefaultClient.Do(req)
+	resp.Body.Close()
+
+	insertReq := map[string]interface{}{
+		"sqlText": "INSERT INTO binding_test SELECT :1, :2",
+		"bindings": map[string]interface{}{
+			"1": map[string]string{"type": "FIXED", "value": "1"},
+			"2": map[string]string{"type": "TEXT", "value": "Alice"},
+		},
+	}
+	body, _ = json.Marshal(insertReq)
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader)
+	resp, _ = http.DefaultClient.Do(req)
+
+	var insertResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&insertResp)
+	resp.Body.Close()
+
+	if insertResp["success"] != true {
+		t.Fatalf("Insert with bindings failed: %v", insertResp)
+	}
+
+	// Verify the inserted data
+	verifyReq := map[string]interface{}{
+		"sqlText": "SELECT name FROM binding_test WHERE id = 1",
+	}
+	body, _ = json.Marshal(verifyReq)
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/queries/v1/query-request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader)
+	resp, _ = http.DefaultClient.Do(req)
+
+	var verifyResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&verifyResp)
+	resp.Body.Close()
+
+	if verifyResp["success"] != true {
+		t.Fatalf("Verify query failed: %v", verifyResp)
+	}
+
+	verifyData := verifyResp["data"].(map[string]interface{})
+	verifyRowSet := verifyData["rowset"].([]interface{})
+	if len(verifyRowSet) != 1 {
+		t.Fatalf("Expected 1 row, got %d", len(verifyRowSet))
+	}
+	verifyRow := verifyRowSet[0].([]interface{})
+	if verifyRow[0] != "Alice" {
+		t.Errorf("Expected 'Alice', got %v", verifyRow[0])
+	}
+
+	t.Log("Bindings via query API: PASSED")
 }
 
 // TestIntegration_MergeStatement tests MERGE INTO statement execution.

@@ -718,3 +718,61 @@ func TestTransactionClassifier(t *testing.T) {
 		})
 	}
 }
+
+// TestExecutor_WithHistoryAndBindings tests that WithHistory methods correctly apply bindings.
+func TestExecutor_WithHistoryAndBindings(t *testing.T) {
+	executor, _ := setupTestExecutor(t)
+	ctx := context.Background()
+
+	t.Run("QueryWithHistory_Bindings", func(t *testing.T) {
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-001", "SELECT :name AS greeting", map[string]*QueryBindingValue{
+			"name": {Type: "TEXT", Value: "hello"},
+		})
+		if err != nil {
+			t.Fatalf("QueryWithHistory() error = %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+		if result.Rows[0][0] != "hello" {
+			t.Errorf("Expected 'hello', got %v", result.Rows[0][0])
+		}
+	})
+
+	t.Run("QueryWithHistory_NilBindings", func(t *testing.T) {
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-002", "SELECT 42 AS num", nil)
+		if err != nil {
+			t.Fatalf("QueryWithHistory() error = %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+	})
+
+	t.Run("ExecuteWithHistory_Bindings", func(t *testing.T) {
+		// Create a table, insert with bindings, then verify
+		_, err := executor.ExecuteWithHistory(ctx, "test-session", "query-003", "CREATE TABLE history_bind_test (id INTEGER, name VARCHAR)", nil)
+		if err != nil {
+			t.Fatalf("CREATE TABLE failed: %v", err)
+		}
+
+		_, err = executor.ExecuteWithHistory(ctx, "test-session", "query-004", "INSERT INTO history_bind_test SELECT :id, :name", map[string]*QueryBindingValue{
+			"id":   {Type: "FIXED", Value: "1"},
+			"name": {Type: "TEXT", Value: "Alice"},
+		})
+		if err != nil {
+			t.Fatalf("INSERT with bindings failed: %v", err)
+		}
+
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-005", "SELECT name FROM history_bind_test WHERE id = 1", nil)
+		if err != nil {
+			t.Fatalf("SELECT failed: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+		if result.Rows[0][0] != "Alice" {
+			t.Errorf("Expected 'Alice', got %v", result.Rows[0][0])
+		}
+	})
+}

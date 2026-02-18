@@ -62,23 +62,26 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert bindings if present
+	bindings := convertBindings(req.Bindings)
+
 	// Classify the SQL statement
 	classification := query.ClassifySQL(req.SQLText)
 
 	if classification.IsQuery {
-		h.executeQuery(w, ctx, sessionID, req.SQLText)
+		h.executeQuery(w, ctx, sessionID, req.SQLText, bindings)
 	} else {
-		h.executeDML(w, ctx, sessionID, req.SQLText)
+		h.executeDML(w, ctx, sessionID, req.SQLText, bindings)
 	}
 }
 
 // executeQuery executes a SELECT query with gosnowflake protocol.
-func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
+func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string, bindings map[string]*query.BindingValue) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	// Generate unique query ID
 	queryID := generateQueryID()
 
-	// Execute query with history tracking
-	result, err := h.executor.QueryWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText)
+	// Execute query with history tracking and bindings
+	result, err := h.executor.QueryWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText, bindings)
 	if err != nil {
 		// Use apierror for error classification
 		// Include the underlying error in the message for debugging
@@ -113,12 +116,12 @@ func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, 
 }
 
 // executeDML executes a DML/DDL statement with gosnowflake protocol.
-func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
+func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string, bindings map[string]*query.BindingValue) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	// Generate unique query ID
 	queryID := generateQueryID()
 
-	// Execute with history tracking
-	result, err := h.executor.ExecuteWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText)
+	// Execute statement with history tracking and bindings
+	result, err := h.executor.ExecuteWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText, bindings)
 	if err != nil {
 		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, "statement execution failed", err))
 		return

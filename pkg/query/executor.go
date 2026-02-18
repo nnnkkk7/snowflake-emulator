@@ -500,7 +500,7 @@ func convertValue(val interface{}) interface{} {
 }
 
 // ExecuteWithHistory wraps Execute with query history tracking.
-func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string) (*ExecResult, error) {
+func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*ExecResult, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -509,8 +509,8 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 		log.Printf("Failed to record query start: %v", err)
 	}
 
-	// Execute the query
-	result, execErr := e.Execute(ctx, sql)
+	// Execute with bindings
+	result, execErr := e.ExecuteWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()
@@ -528,7 +528,7 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 }
 
 // QueryWithHistory wraps Query with query history tracking.
-func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string) (*Result, error) {
+func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*Result, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -537,8 +537,8 @@ func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql
 		log.Printf("Failed to record query start: %v", err)
 	}
 
-	// Execute the query
-	result, execErr := e.Query(ctx, sql)
+	// Execute query with bindings
+	result, execErr := e.QueryWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()
