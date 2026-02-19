@@ -111,8 +111,8 @@ func TestRestAPIv2Handler_SubmitStatement_WithBindings(t *testing.T) {
 		Database:  "TEST_DB",
 		Schema:    "PUBLIC",
 		Bindings: map[string]*types.BindingValue{
-			"1": {Type: "FIXED", Value: "42"},
-			"2": {Type: "TEXT", Value: "hello"},
+			"1": {Type: "FIXED", Value: strPtr("42")},
+			"2": {Type: "TEXT", Value: strPtr("hello")},
 		},
 	}
 	body, _ := json.Marshal(reqBody)

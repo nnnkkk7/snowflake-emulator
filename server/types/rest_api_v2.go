@@ -18,8 +18,8 @@ type SubmitStatementRequest struct {
 
 // BindingValue represents a parameter binding value.
 type BindingValue struct {
-	Type  string `json:"type"`  // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
-	Value string `json:"value"` // String representation of the value
+	Type  string  `json:"type"`  // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
+	Value *string `json:"value"` // String representation of the value (nil for SQL NULL)
 }
 
 // StatementResponse represents the response from statement operations.

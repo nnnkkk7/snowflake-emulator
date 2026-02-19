@@ -544,7 +544,7 @@ func TestIntegration_AllSQLOperations(t *testing.T) {
 	// === Parameter Binding ===
 	t.Run("ParameterBinding_Colon", func(t *testing.T) {
 		bindings := map[string]*QueryBindingValue{
-			"1": {Type: "FIXED", Value: "1"},
+			"1": {Type: "FIXED", Value: strPtr("1")},
 		}
 		result, err := executor.QueryWithBindings(ctx, "SELECT * FROM ddl_test WHERE id = :1", bindings)
 		if err != nil {
@@ -557,7 +557,7 @@ func TestIntegration_AllSQLOperations(t *testing.T) {
 
 	t.Run("ParameterBinding_QuestionMark", func(t *testing.T) {
 		bindings := map[string]*QueryBindingValue{
-			"1": {Type: "TEXT", Value: "Alice Updated"},
+			"1": {Type: "TEXT", Value: strPtr("Alice Updated")},
 		}
 		result, err := executor.QueryWithBindings(ctx, "SELECT * FROM ddl_test WHERE name = ?", bindings)
 		if err != nil {

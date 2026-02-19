@@ -19,6 +19,9 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
+// strPtr returns a pointer to a string literal.
+func strPtr(s string) *string { return &s }
+
 // setupTestQueryHandler creates a test query handler with dependencies.
 func setupTestQueryHandler(t *testing.T) (*QueryHandler, *session.Manager, *metadata.Repository) {
 	t.Helper()
@@ -437,5 +440,117 @@ func TestQueryHandler_QueryResultFormat(t *testing.T) {
 	// Verify query result format
 	if resp.Data.QueryResultFormat != "json" {
 		t.Errorf("Expected queryResultFormat 'json', got %s", resp.Data.QueryResultFormat)
+	}
+}
+
+// TestQueryHandler_QueryWithBindings tests that bindings are applied in SELECT queries.
+func TestQueryHandler_QueryWithBindings(t *testing.T) {
+	handler, sessionMgr, _ := setupTestQueryHandler(t)
+	ctx := context.Background()
+
+	sess, err := sessionMgr.CreateSession(ctx, "testuser", "TEST_DB", "PUBLIC")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Test named bindings in a SELECT
+	reqBody := `{
+		"sqlText": "SELECT :name AS greeting, :num AS number",
+		"bindings": {
+			"name": {"type": "TEXT", "value": "hello"},
+			"num": {"type": "FIXED", "value": "42"}
+		}
+	}`
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/queries/v1/query-request", bytes.NewReader([]byte(reqBody)))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Snowflake Token=\""+sess.Token+"\"")
+
+	rr := httptest.NewRecorder()
+	handler.ExecuteQuery(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var resp types.QueryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("Expected success, got failure: %s", resp.Message)
+	}
+
+	if resp.Data == nil || len(resp.Data.RowSet) != 1 {
+		t.Fatalf("Expected 1 row, got %v", resp.Data)
+	}
+
+	row := resp.Data.RowSet[0]
+	if row[0] != "hello" {
+		t.Errorf("Expected 'hello', got %s", row[0])
+	}
+	if row[1] != "42" {
+		t.Errorf("Expected '42', got %s", row[1])
+	}
+}
+
+// TestQueryHandler_DMLWithBindings tests that bindings are applied in DML statements.
+func TestQueryHandler_DMLWithBindings(t *testing.T) {
+	handler, sessionMgr, _ := setupTestQueryHandler(t)
+	ctx := context.Background()
+
+	sess, err := sessionMgr.CreateSession(ctx, "testuser", "TEST_DB", "PUBLIC")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Insert with named bindings
+	reqBody := `{
+		"sqlText": "INSERT INTO TEST_DB.PUBLIC_TEST_TABLE SELECT :id, :name, :value",
+		"bindings": {
+			"id": {"type": "FIXED", "value": "99"},
+			"name": {"type": "TEXT", "value": "Charlie"},
+			"value": {"type": "FIXED", "value": "300"}
+		}
+	}`
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/queries/v1/query-request", bytes.NewReader([]byte(reqBody)))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Snowflake Token=\""+sess.Token+"\"")
+
+	rr := httptest.NewRecorder()
+	handler.ExecuteQuery(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var resp types.QueryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("Expected success, got failure: %s", resp.Message)
+	}
+
+	// Verify the row was inserted by querying it back
+	verifyBody := `{"sqlText": "SELECT NAME FROM TEST_DB.PUBLIC_TEST_TABLE WHERE ID = 99"}`
+	httpReq = httptest.NewRequest(http.MethodPost, "/queries/v1/query-request", bytes.NewReader([]byte(verifyBody)))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Snowflake Token=\""+sess.Token+"\"")
+
+	rr = httptest.NewRecorder()
+	handler.ExecuteQuery(rr, httpReq)
+
+	var verifyResp types.QueryResponse
+	json.Unmarshal(rr.Body.Bytes(), &verifyResp)
+
+	if !verifyResp.Success || len(verifyResp.Data.RowSet) != 1 {
+		t.Fatalf("Expected 1 row after insert, got %v", verifyResp.Data)
+	}
+	if verifyResp.Data.RowSet[0][0] != "Charlie" {
+		t.Errorf("Expected 'Charlie', got %s", verifyResp.Data.RowSet[0][0])
 	}
 }

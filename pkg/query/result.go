@@ -8,8 +8,8 @@ import (
 // BindingValue represents a parameter binding value for SQL queries.
 // This mirrors the REST API v2 binding format.
 type BindingValue struct {
-	Type  string // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
-	Value string // String representation of the value
+	Type  string  // FIXED, TEXT, REAL, BOOLEAN, DATE, TIME, TIMESTAMP, etc.
+	Value *string // String representation of the value (nil for SQL NULL)
 }
 
 // QueryBindingValue is an alias for BindingValue for backward compatibility.

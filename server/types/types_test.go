@@ -83,7 +83,7 @@ func TestQueryRequestJSON(t *testing.T) {
 	if req.SQLText != "SELECT * FROM test_table" {
 		t.Errorf("Expected SQLText='SELECT * FROM test_table', got %s", req.SQLText)
 	}
-	if req.Bindings["param1"] == nil || req.Bindings["param1"].Value != "value1" {
+	if req.Bindings["param1"] == nil || req.Bindings["param1"].Value == nil || *req.Bindings["param1"].Value != "value1" {
 		t.Errorf("Expected bindings[param1].Value=value1, got %v", req.Bindings["param1"])
 	}
 }

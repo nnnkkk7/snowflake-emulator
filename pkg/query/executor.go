@@ -207,32 +207,34 @@ func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[stri
 //
 //nolint:gocyclo // switch statement for type handling inherently has many branches
 func formatBindingValue(b *QueryBindingValue) (string, error) {
-	if b == nil {
+	if b == nil || b.Value == nil {
 		return ValueNull, nil
 	}
+
+	value := *b.Value
 
 	switch strings.ToUpper(b.Type) {
 	case TypeText, "VARCHAR", "STRING":
 		// Escape single quotes and wrap in quotes
-		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		escaped := strings.ReplaceAll(value, "'", "''")
 		return "'" + escaped + "'", nil
 
 	case "FIXED", "INTEGER", "BIGINT", "SMALLINT", "TINYINT":
 		// Validate it's a number
-		if _, err := strconv.ParseInt(b.Value, 10, 64); err != nil {
-			return "", fmt.Errorf("invalid integer value: %s", b.Value)
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return "", fmt.Errorf("invalid integer value: %s", value)
 		}
-		return b.Value, nil
+		return value, nil
 
 	case "REAL", "FLOAT", "DOUBLE", "NUMBER", "DECIMAL":
 		// Validate it's a number
-		if _, err := strconv.ParseFloat(b.Value, 64); err != nil {
-			return "", fmt.Errorf("invalid float value: %s", b.Value)
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
+			return "", fmt.Errorf("invalid float value: %s", value)
 		}
-		return b.Value, nil
+		return value, nil
 
 	case "BOOLEAN":
-		lower := strings.ToLower(b.Value)
+		lower := strings.ToLower(value)
 		if lower == "true" || lower == "1" {
 			return "TRUE", nil
 		}
@@ -240,31 +242,39 @@ func formatBindingValue(b *QueryBindingValue) (string, error) {
 
 	case "DATE":
 		// Validate date format to prevent SQL injection
-		if !dateRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid DATE format: %s (expected YYYY-MM-DD)", b.Value)
+		if !dateRegex.MatchString(value) {
+			return "", fmt.Errorf("invalid DATE format: %s (expected YYYY-MM-DD)", value)
 		}
-		return "DATE '" + b.Value + "'", nil
+		return "DATE '" + value + "'", nil
 
 	case "TIME":
 		// Validate time format to prevent SQL injection
-		if !timeRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid TIME format: %s (expected HH:MM:SS)", b.Value)
+		if !timeRegex.MatchString(value) {
+			return "", fmt.Errorf("invalid TIME format: %s (expected HH:MM:SS)", value)
 		}
-		return "TIME '" + b.Value + "'", nil
+		return "TIME '" + value + "'", nil
 
 	case "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ":
-		// Validate timestamp format to prevent SQL injection
-		if !timestampRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid TIMESTAMP format: %s (expected YYYY-MM-DD HH:MM:SS)", b.Value)
+		// The Snowflake drivers may send timestamps as either:
+		// - Formatted strings: "2024-01-01 00:00:00"
+		// - Nanoseconds since epoch: "1704067200000000000"
+		if timestampRegex.MatchString(value) {
+			return "TIMESTAMP '" + value + "'", nil
 		}
-		return "TIMESTAMP '" + b.Value + "'", nil
+		// Try parsing as nanoseconds since epoch
+		nanos, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("invalid TIMESTAMP format: %s (expected YYYY-MM-DD HH:MM:SS or epoch nanoseconds)", value)
+		}
+		t := time.Unix(0, nanos).UTC()
+		return "TIMESTAMP '" + t.Format("2006-01-02 15:04:05.999999999") + "'", nil
 
 	case ValueNull:
 		return ValueNull, nil
 
 	default:
 		// Default to text treatment
-		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		escaped := strings.ReplaceAll(value, "'", "''")
 		return "'" + escaped + "'", nil
 	}
 }
