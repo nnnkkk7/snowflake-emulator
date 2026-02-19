@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -150,11 +151,24 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 
 // applyBindings replaces :N or :name placeholders with actual values from bindings.
 // Snowflake uses :1, :2, etc. for positional parameters and :p0, :p1, etc. for named parameters.
-// Uses regex word-boundary matching to avoid partial replacements (e.g., :p1 inside :p10).
+// Keys are sorted by length descending so that longer keys are replaced first,
+// preventing partial matches (e.g., :p10 is replaced before :p1).
 func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
-	result := sql
+	// Sort keys by length descending to prevent partial matches
+	keys := make([]string, 0, len(bindings))
+	for k := range bindings {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] > keys[j]
+	})
 
-	for key, binding := range bindings {
+	result := sql
+	for _, key := range keys {
+		binding := bindings[key]
 		if binding == nil {
 			continue
 		}
@@ -162,16 +176,43 @@ func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingVa
 		if err != nil {
 			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
 		}
-		// Match :key only when not followed by a word character (letter, digit, underscore)
-		// This prevents :p1 from matching inside :p10
-		re := regexp.MustCompile(`:` + regexp.QuoteMeta(key) + `\b`)
-		result = re.ReplaceAllLiteralString(result, value)
+		result = replaceBindingPlaceholder(result, key, value)
 	}
 
 	// Also handle ? placeholders (positional, 1-based)
 	result = e.replaceQuestionMarkPlaceholders(result, bindings)
 
 	return result, nil
+}
+
+// replaceBindingPlaceholder replaces all occurrences of :key in sql with value,
+// only when :key is not followed by a word character (letter, digit, or underscore).
+func replaceBindingPlaceholder(sql, key, value string) string {
+	placeholder := ":" + key
+	placeholderLen := len(placeholder)
+	var b strings.Builder
+	b.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		if i+placeholderLen <= len(sql) && sql[i:i+placeholderLen] == placeholder {
+			// Check that the next character (if any) is not a word character
+			end := i + placeholderLen
+			if end >= len(sql) || !isBindingWordChar(sql[end]) {
+				b.WriteString(value)
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(sql[i])
+		i++
+	}
+	return b.String()
+}
+
+// isBindingWordChar returns true if b is a letter, digit, or underscore.
+func isBindingWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.

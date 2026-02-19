@@ -139,7 +139,9 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 		}
 	}
 
-	// Check for transaction control statements
+	// Check for transaction control statements.
+	// ROLLBACK falls through to generic DML (0x3000) because Snowflake's wire protocol
+	// does not define a dedicated statement type ID for ROLLBACK.
 	if c.isTransactionStatement(upperSQL) {
 		stmtTypeID := config.StatementTypeDML
 		if strings.HasPrefix(upperSQL, "BEGIN") || strings.HasPrefix(upperSQL, "START TRANSACTION") {
