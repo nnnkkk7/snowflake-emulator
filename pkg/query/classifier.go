@@ -86,11 +86,42 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 		}
 	}
 
+	// Check for specific DML statements
+	if strings.HasPrefix(upperSQL, "INSERT") {
+		return ClassifyResult{
+			Type:            StatementTypeDML,
+			StatementTypeID: config.StatementTypeInsert,
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           true,
+		}
+	}
+
+	if strings.HasPrefix(upperSQL, "UPDATE") {
+		return ClassifyResult{
+			Type:            StatementTypeDML,
+			StatementTypeID: config.StatementTypeUpdate,
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           true,
+		}
+	}
+
+	if strings.HasPrefix(upperSQL, "DELETE") {
+		return ClassifyResult{
+			Type:            StatementTypeDML,
+			StatementTypeID: config.StatementTypeDelete,
+			IsQuery:         false,
+			IsDDL:           false,
+			IsDML:           true,
+		}
+	}
+
 	// Check for COPY INTO statement
 	if strings.HasPrefix(upperSQL, "COPY") {
 		return ClassifyResult{
 			Type:            StatementTypeCopy,
-			StatementTypeID: config.StatementTypeDML, // COPY is treated as DML
+			StatementTypeID: config.StatementTypeCopy,
 			IsQuery:         false,
 			IsDDL:           false,
 			IsDML:           true,
@@ -101,7 +132,7 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 	if strings.HasPrefix(upperSQL, "MERGE") {
 		return ClassifyResult{
 			Type:            StatementTypeMerge,
-			StatementTypeID: config.StatementTypeDML, // MERGE is treated as DML
+			StatementTypeID: config.StatementTypeMerge,
 			IsQuery:         false,
 			IsDDL:           false,
 			IsDML:           true,
@@ -110,16 +141,22 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 
 	// Check for transaction control statements
 	if c.isTransactionStatement(upperSQL) {
+		stmtTypeID := config.StatementTypeDML
+		if strings.HasPrefix(upperSQL, "BEGIN") || strings.HasPrefix(upperSQL, "START TRANSACTION") {
+			stmtTypeID = config.StatementTypeBegin
+		} else if strings.HasPrefix(upperSQL, "COMMIT") {
+			stmtTypeID = config.StatementTypeCommit
+		}
 		return ClassifyResult{
 			Type:            StatementTypeTransaction,
-			StatementTypeID: config.StatementTypeDML, // Transaction control statements
+			StatementTypeID: stmtTypeID,
 			IsQuery:         false,
 			IsDDL:           false,
 			IsDML:           false,
 		}
 	}
 
-	// Default to DML for INSERT, UPDATE, DELETE, etc.
+	// Default to generic DML
 	return ClassifyResult{
 		Type:            StatementTypeDML,
 		StatementTypeID: config.StatementTypeDML,

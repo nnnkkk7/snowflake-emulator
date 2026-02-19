@@ -5,12 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
+	"github.com/nnnkkk7/snowflake-emulator/pkg/config"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/query"
@@ -21,6 +23,64 @@ import (
 
 // strPtr returns a pointer to a string literal.
 func strPtr(s string) *string { return &s }
+
+// TestBuildDMLRowset tests the buildDMLRowset helper for all statement types.
+func TestBuildDMLRowset(t *testing.T) {
+	tests := []struct {
+		name            string
+		stmtTypeID      config.StatementTypeID
+		rowsAffected    int64
+		expectColName   string
+		expectRowset    bool
+		expectReturned  int64
+	}{
+		{"INSERT", config.StatementTypeInsert, 3, "number of rows inserted", true, 1},
+		{"UPDATE", config.StatementTypeUpdate, 5, "number of rows updated", true, 1},
+		{"DELETE", config.StatementTypeDelete, 1, "number of rows deleted", true, 1},
+		{"MERGE", config.StatementTypeMerge, 7, "number of rows merged", true, 1},
+		{"DDL", config.StatementTypeDDL, 0, "", false, 0},
+		{"BEGIN", config.StatementTypeBegin, 0, "", false, 0},
+		{"COMMIT", config.StatementTypeCommit, 0, "", false, 0},
+		{"SELECT", config.StatementTypeSelect, 0, "", false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowType, rowSet, returned := buildDMLRowset(tt.stmtTypeID, tt.rowsAffected)
+			if returned != tt.expectReturned {
+				t.Errorf("returned = %d, want %d", returned, tt.expectReturned)
+			}
+			if tt.expectRowset {
+				if len(rowType) != 1 {
+					t.Fatalf("Expected 1 column in rowType, got %d", len(rowType))
+				}
+				if rowType[0].Name != tt.expectColName {
+					t.Errorf("column name = %q, want %q", rowType[0].Name, tt.expectColName)
+				}
+				if rowType[0].Type != "fixed" {
+					t.Errorf("column type = %q, want \"fixed\"", rowType[0].Type)
+				}
+				if rowType[0].Precision != 19 {
+					t.Errorf("column precision = %d, want 19", rowType[0].Precision)
+				}
+				if len(rowSet) != 1 || len(rowSet[0]) != 1 {
+					t.Fatalf("Expected rowSet [[count]], got %v", rowSet)
+				}
+				expected := fmt.Sprintf("%d", tt.rowsAffected)
+				if rowSet[0][0] != expected {
+					t.Errorf("rowSet value = %q, want %q", rowSet[0][0], expected)
+				}
+			} else {
+				if len(rowType) != 0 {
+					t.Errorf("Expected empty rowType, got %v", rowType)
+				}
+				if len(rowSet) != 0 {
+					t.Errorf("Expected empty rowSet, got %v", rowSet)
+				}
+			}
+		})
+	}
+}
 
 // setupTestQueryHandler creates a test query handler with dependencies.
 func setupTestQueryHandler(t *testing.T) (*QueryHandler, *session.Manager, *metadata.Repository) {
@@ -257,6 +317,16 @@ func TestQueryHandler_ExecuteDML(t *testing.T) {
 				if resp.Data.Total != 1 {
 					t.Errorf("Expected 1 row affected, got %d", resp.Data.Total)
 				}
+				if resp.Data.StatementTypeID != 0x3100 {
+					t.Errorf("Expected statement type ID 0x3100, got %d", resp.Data.StatementTypeID)
+				}
+				// Verify rowset contains affected count
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "1" {
+					t.Errorf("Expected rowset [[\"1\"]], got %v", resp.Data.RowSet)
+				}
+				if len(resp.Data.RowType) != 1 || resp.Data.RowType[0].Name != "number of rows inserted" {
+					t.Errorf("Expected column 'number of rows inserted', got %v", resp.Data.RowType)
+				}
 			},
 		},
 		{
@@ -273,6 +343,15 @@ func TestQueryHandler_ExecuteDML(t *testing.T) {
 				if resp.Data.Total != 1 {
 					t.Errorf("Expected 1 row affected, got %d", resp.Data.Total)
 				}
+				if resp.Data.StatementTypeID != 0x3200 {
+					t.Errorf("Expected statement type ID 0x3200, got %d", resp.Data.StatementTypeID)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "1" {
+					t.Errorf("Expected rowset [[\"1\"]], got %v", resp.Data.RowSet)
+				}
+				if len(resp.Data.RowType) != 1 || resp.Data.RowType[0].Name != "number of rows updated" {
+					t.Errorf("Expected column 'number of rows updated', got %v", resp.Data.RowType)
+				}
 			},
 		},
 		{
@@ -288,6 +367,15 @@ func TestQueryHandler_ExecuteDML(t *testing.T) {
 				}
 				if resp.Data.Total != 1 {
 					t.Errorf("Expected 1 row affected, got %d", resp.Data.Total)
+				}
+				if resp.Data.StatementTypeID != 0x3300 {
+					t.Errorf("Expected statement type ID 0x3300, got %d", resp.Data.StatementTypeID)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "1" {
+					t.Errorf("Expected rowset [[\"1\"]], got %v", resp.Data.RowSet)
+				}
+				if len(resp.Data.RowType) != 1 || resp.Data.RowType[0].Name != "number of rows deleted" {
+					t.Errorf("Expected column 'number of rows deleted', got %v", resp.Data.RowType)
 				}
 			},
 		},
@@ -552,5 +640,54 @@ func TestQueryHandler_DMLWithBindings(t *testing.T) {
 	}
 	if verifyResp.Data.RowSet[0][0] != "Charlie" {
 		t.Errorf("Expected 'Charlie', got %s", verifyResp.Data.RowSet[0][0])
+	}
+}
+
+// TestQueryHandler_DDLReturnsEmptyRowset tests that DDL statements return empty rowset.
+func TestQueryHandler_DDLReturnsEmptyRowset(t *testing.T) {
+	handler, sessionMgr, _ := setupTestQueryHandler(t)
+	ctx := context.Background()
+
+	sess, err := sessionMgr.CreateSession(ctx, "testuser", "TEST_DB", "PUBLIC")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	req := types.QueryRequest{
+		SQLText: "CREATE TABLE TEST_DB.PUBLIC_DDL_TEST (id INTEGER, name VARCHAR)",
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/queries/v1/query-request", bytes.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Snowflake Token=\""+sess.Token+"\"")
+
+	rr := httptest.NewRecorder()
+	handler.ExecuteQuery(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var resp types.QueryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("Expected success, got failure: %s", resp.Message)
+	}
+
+	if resp.Data.StatementTypeID != int64(config.StatementTypeDDL) {
+		t.Errorf("Expected statement type ID %d (DDL), got %d", config.StatementTypeDDL, resp.Data.StatementTypeID)
+	}
+	if len(resp.Data.RowType) != 0 {
+		t.Errorf("Expected empty rowType for DDL, got %v", resp.Data.RowType)
+	}
+	if len(resp.Data.RowSet) != 0 {
+		t.Errorf("Expected empty rowSet for DDL, got %v", resp.Data.RowSet)
+	}
+	if resp.Data.Returned != 0 {
+		t.Errorf("Expected returned=0 for DDL, got %d", resp.Data.Returned)
 	}
 }

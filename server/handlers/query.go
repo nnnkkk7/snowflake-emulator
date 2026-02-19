@@ -130,20 +130,21 @@ func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, se
 	// Get statement type ID using the classifier
 	stmtTypeID := query.GetStatementTypeID(sqlText)
 
-	// Build success response
-	// RowType and RowSet must be non-nil (empty arrays) even for DDL/DML statements.
-	// The Snowflake .NET driver expects these fields to always be present;
-	// omitting them causes a NullReferenceException in ResultSetUtil.IsDQL.
+	// Build response with rowset data for DML statements.
+	// The Snowflake .NET driver's CalculateUpdateCount reads affected row counts
+	// from the rowset data (not the total field) for INSERT/UPDATE/DELETE/MERGE.
+	rowType, rowSet, returned := buildDMLRowset(stmtTypeID, result.RowsAffected)
+
 	resp := types.QueryResponse{
 		Success: true,
 		Data: &types.QuerySuccessData{
 			QueryID:           queryID,
 			SQLState:          apierror.SQLStateSuccess,
 			StatementTypeID:   int64(stmtTypeID),
-			RowType:           []types.ColumnMetadata{},
-			RowSet:            [][]string{},
+			RowType:           rowType,
+			RowSet:            rowSet,
 			Total:             result.RowsAffected,
-			Returned:          0,
+			Returned:          returned,
 			QueryResultFormat: config.QueryResultFormatJSON,
 		},
 	}
@@ -151,6 +152,46 @@ func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, se
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// dmlColumnName returns the column name for the affected row count based on statement type.
+func dmlColumnName(stmtTypeID config.StatementTypeID) (string, bool) {
+	switch stmtTypeID {
+	case config.StatementTypeInsert:
+		return "number of rows inserted", true
+	case config.StatementTypeUpdate:
+		return "number of rows updated", true
+	case config.StatementTypeDelete:
+		return "number of rows deleted", true
+	case config.StatementTypeMerge:
+		return "number of rows merged", true
+	default:
+		return "", false
+	}
+}
+
+// buildDMLRowset builds the rowType and rowSet for DML responses.
+// For INSERT/UPDATE/DELETE/MERGE, it returns a single-row rowset with the affected count.
+// For other statements (DDL, transaction control), it returns empty arrays.
+func buildDMLRowset(stmtTypeID config.StatementTypeID, rowsAffected int64) ([]types.ColumnMetadata, [][]string, int64) {
+	colName, isDML := dmlColumnName(stmtTypeID)
+	if !isDML {
+		return []types.ColumnMetadata{}, [][]string{}, 0
+	}
+
+	rowType := []types.ColumnMetadata{
+		{
+			Name:      colName,
+			Type:      "fixed",
+			Scale:     0,
+			Precision: 19,
+			Nullable:  false,
+		},
+	}
+	rowSet := [][]string{
+		{fmt.Sprintf("%d", rowsAffected)},
+	}
+	return rowType, rowSet, 1
 }
 
 // AbortQuery handles query abort requests.
