@@ -21,6 +21,8 @@ var (
 	timeRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d+)?$`)
 	// Timestamp format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS with optional timezone
 	timestampRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$`)
+	// Question mark placeholder for positional parameters
+	questionMarkRegex = regexp.MustCompile(`\?`)
 )
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
@@ -175,8 +177,7 @@ func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingVa
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
 func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*QueryBindingValue) string {
 	// Find all ? placeholders
-	re := regexp.MustCompile(`\?`)
-	matches := re.FindAllStringIndex(sql, -1)
+	matches := questionMarkRegex.FindAllStringIndex(sql, -1)
 	if len(matches) == 0 {
 		return sql
 	}
