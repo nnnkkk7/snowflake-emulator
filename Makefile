@@ -1,4 +1,4 @@
-.PHONY: all build test test-unit test-integration test-e2e test-all test-coverage lint fmt ci clean run docker-build docker-up docker-down docker-test docker-logs
+.PHONY: all build test test-unit test-integration test-e2e test-all test-coverage lint fmt vuln ci clean run docker-build docker-up docker-down docker-test docker-logs
 
 # Default target
 all: build
@@ -34,6 +34,10 @@ test-coverage:
 # Run linter
 lint:
 	golangci-lint run --timeout=5m
+
+# Run dependency vulnerability scan
+vuln:
+	govulncheck ./...
 
 # Format code
 fmt:

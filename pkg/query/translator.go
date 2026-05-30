@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blastrain/vitess-sqlparser/sqlparser"
+	"vitess.io/vitess/go/vt/sqlparser"
 )
 
 // Translator converts Snowflake SQL to DuckDB-compatible SQL using AST manipulation.
 type Translator struct {
+	parser      *sqlparser.Parser
 	functionMap map[string]FunctionTranslator
 }
 
@@ -21,6 +22,7 @@ type FunctionTranslator struct {
 // NewTranslator creates a new SQL translator with registered function mappings.
 func NewTranslator() *Translator {
 	t := &Translator{
+		parser:      sqlparser.NewTestParser(),
 		functionMap: make(map[string]FunctionTranslator),
 	}
 	t.registerFunctions()
@@ -44,14 +46,10 @@ func (t *Translator) registerFunctions() {
 			if len(fn.Exprs) != 3 {
 				return fn
 			}
-			// Modify the function name
-			fn.Name = sqlparser.NewColIdent("IF")
-			// Wrap the first argument with IS NOT NULL
-			if aliased, ok := fn.Exprs[0].(*sqlparser.AliasedExpr); ok {
-				aliased.Expr = &sqlparser.IsExpr{
-					Operator: "is not null",
-					Expr:     aliased.Expr,
-				}
+			fn.Name = sqlparser.NewIdentifierCI("IF")
+			fn.Exprs[0] = &sqlparser.IsExpr{
+				Left:  fn.Exprs[0],
+				Right: sqlparser.IsNotNullOp,
 			}
 			return fn
 		},
@@ -60,8 +58,7 @@ func (t *Translator) registerFunctions() {
 	// TO_VARIANT: Marks for post-processing (can't replace node type with Walk)
 	t.functionMap["TO_VARIANT"] = FunctionTranslator{
 		Handler: func(fn *sqlparser.FuncExpr) sqlparser.Expr {
-			// Mark for post-processing by setting a unique marker name
-			fn.Name = sqlparser.NewColIdent("__TO_VARIANT__")
+			fn.Name = sqlparser.NewIdentifierCI("__TO_VARIANT__")
 			return fn
 		},
 	}
@@ -69,7 +66,7 @@ func (t *Translator) registerFunctions() {
 	// PARSE_JSON: Marks for post-processing
 	t.functionMap["PARSE_JSON"] = FunctionTranslator{
 		Handler: func(fn *sqlparser.FuncExpr) sqlparser.Expr {
-			fn.Name = sqlparser.NewColIdent("__PARSE_JSON__")
+			fn.Name = sqlparser.NewIdentifierCI("__PARSE_JSON__")
 			return fn
 		},
 	}
@@ -78,7 +75,7 @@ func (t *Translator) registerFunctions() {
 	// DATEADD(part, n, date) → (date + INTERVAL n part)
 	t.functionMap["DATEADD"] = FunctionTranslator{
 		Handler: func(fn *sqlparser.FuncExpr) sqlparser.Expr {
-			fn.Name = sqlparser.NewColIdent("__DATEADD__")
+			fn.Name = sqlparser.NewIdentifierCI("__DATEADD__")
 			return fn
 		},
 	}
@@ -87,7 +84,7 @@ func (t *Translator) registerFunctions() {
 	// DATEDIFF(part, start, end) → DATE_DIFF('part', start, end)
 	t.functionMap["DATEDIFF"] = FunctionTranslator{
 		Handler: func(fn *sqlparser.FuncExpr) sqlparser.Expr {
-			fn.Name = sqlparser.NewColIdent("__DATEDIFF__")
+			fn.Name = sqlparser.NewIdentifierCI("__DATEDIFF__")
 			return fn
 		},
 	}
@@ -103,8 +100,8 @@ func (t *Translator) Translate(sql string) (string, error) {
 	sql = strings.TrimSpace(sql)
 
 	// Skip AST transformation for DDL statements - they don't need function translation
-	// and the sqlparser adds unwanted backticks when serializing back to string
-	// Also skip SHOW/DESCRIBE/EXPLAIN which cause vitess-sqlparser to panic
+	// and the sqlparser adds unwanted backticks when serializing back to string.
+	// Also skip SHOW/DESCRIBE/EXPLAIN which the parser does not handle for translation.
 	upperSQL := strings.ToUpper(sql)
 	if strings.HasPrefix(upperSQL, "CREATE ") ||
 		strings.HasPrefix(upperSQL, "DROP ") ||
@@ -118,7 +115,7 @@ func (t *Translator) Translate(sql string) (string, error) {
 	}
 
 	// Parse the SQL statement into an AST
-	stmt, err := sqlparser.Parse(sql)
+	stmt, err := t.parser.Parse(sql)
 	if err != nil {
 		// If parsing fails, return original SQL
 		// DuckDB might handle some Snowflake syntax directly
@@ -132,11 +129,9 @@ func (t *Translator) Translate(sql string) (string, error) {
 			funcName := strings.ToUpper(n.Name.String())
 			if translator, exists := t.functionMap[funcName]; exists {
 				if translator.Handler != nil {
-					// Apply handler - modifies the node in-place or marks it
 					translator.Handler(n)
 				} else if translator.Name != "" {
-					// Simple function rename - modify in-place
-					n.Name = sqlparser.NewColIdent(translator.Name)
+					n.Name = sqlparser.NewIdentifierCI(translator.Name)
 				}
 			}
 		}
@@ -155,7 +150,10 @@ func (t *Translator) Translate(sql string) (string, error) {
 // handleComplexTransformations handles transformations that require more than simple renames.
 // This handles marked functions and CURRENT_TIMESTAMP/CURRENT_DATE.
 func (t *Translator) handleComplexTransformations(sql string) string {
-	// Remove "from dual" added by vitess-sqlparser (Oracle-style, not needed in DuckDB)
+	// Remove MySQL-style identifier quoting added by the sqlparser (not used by DuckDB)
+	sql = strings.ReplaceAll(sql, "`", "")
+
+	// Remove "from dual" added by the sqlparser (Oracle-style, not needed in DuckDB)
 	sql = removeDualSuffix(sql)
 
 	// Remove parentheses from CURRENT_TIMESTAMP() and CURRENT_DATE()
@@ -224,7 +222,6 @@ func (t *Translator) transformDATEADD(sql string) string {
 		part := strings.TrimSpace(parts[0])
 		n := strings.TrimSpace(parts[1])
 		date := strings.TrimSpace(parts[2])
-		// Cast date argument to DATE to handle string literals
 		return fmt.Sprintf("(CAST(%s AS DATE) + interval %s %s)", date, n, part)
 	})
 }
@@ -239,18 +236,15 @@ func (t *Translator) transformDATEDIFF(sql string) string {
 		part := strings.TrimSpace(parts[0])
 		startDate := strings.TrimSpace(parts[1])
 		endDate := strings.TrimSpace(parts[2])
-		// Cast date arguments to DATE to handle string literals
 		return fmt.Sprintf("DATE_DIFF('%s', CAST(%s AS DATE), CAST(%s AS DATE))", part, startDate, endDate)
 	})
 }
 
 // removeDualSuffix removes " from dual" suffix (case-insensitive) without regex.
 func removeDualSuffix(sql string) string {
-	// Trim trailing whitespace first
 	trimmed := strings.TrimRight(sql, " \t\n\r")
 	lower := strings.ToLower(trimmed)
 
-	// Check for " from dual" at the end
 	suffix := " from dual"
 	if strings.HasSuffix(lower, suffix) {
 		return trimmed[:len(trimmed)-len(suffix)]
@@ -259,7 +253,6 @@ func removeDualSuffix(sql string) string {
 }
 
 // splitFunctionArgs splits function arguments respecting parentheses nesting.
-// expectedCount is a hint for the expected number of arguments.
 func splitFunctionArgs(args string, expectedCount int) []string {
 	result := make([]string, 0, expectedCount)
 	depth := 0
@@ -279,7 +272,6 @@ func splitFunctionArgs(args string, expectedCount int) []string {
 		}
 	}
 
-	// Add the last argument
 	if start < len(args) {
 		result = append(result, args[start:])
 	}

@@ -39,6 +39,9 @@ type LoginSuccessData struct {
 	ValidityInSeconds       int64              `json:"validityInSeconds"`
 	MasterValidityInSeconds int64              `json:"masterValidityInSeconds"`
 	SessionID               int64              `json:"sessionId"`
+	DisplayUserName         string             `json:"displayUserName,omitempty"`
+	ServerVersion           string             `json:"serverVersion,omitempty"`
+	HealthCheckInterval     int64              `json:"healthCheckInterval,omitempty"`
 	Parameters              []ParameterBinding `json:"parameters"`
 	SessionInfo             SessionInfo        `json:"sessionInfo"`
 }
@@ -46,7 +49,7 @@ type LoginSuccessData struct {
 // ParameterBinding represents a session parameter name-value pair.
 type ParameterBinding struct {
 	Name  string `json:"name"`
-	Value string `json:"value"`
+	Value any    `json:"value"`
 }
 
 // SessionInfo contains session context information.
@@ -93,9 +96,17 @@ type HeartbeatResponse struct {
 
 // QueryRequest is a SQL query execution request.
 type QueryRequest struct {
-	SQLText    string                 `json:"sqlText"`
-	Bindings   map[string]interface{} `json:"bindings,omitempty"`
-	Parameters map[string]string      `json:"parameters,omitempty"`
+	SQLText             string                 `json:"sqlText"`
+	RequestID           string                 `json:"requestId,omitempty"`
+	DescribeOnly        bool                   `json:"describeOnly,omitempty"`
+	SequenceID          *int                   `json:"sequenceId,omitempty"`
+	Bindings            map[string]interface{} `json:"bindings,omitempty"`
+	Parameters          map[string]interface{} `json:"parameters,omitempty"`
+	BindStage           string                 `json:"bindStage,omitempty"`
+	DescribedJobID      string                 `json:"describedJobId,omitempty"`
+	QuerySubmissionTime int64                  `json:"querySubmissionTime,omitempty"`
+	IsInternal          bool                   `json:"isInternal,omitempty"`
+	AsyncExec           bool                   `json:"asyncExec,omitempty"`
 }
 
 // QueryResponse is the response to a query request.
