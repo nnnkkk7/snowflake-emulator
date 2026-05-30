@@ -81,7 +81,7 @@ docker run -p 8080:8080 -v snowflake-data:/data \
 
 Prerequisites:
 
-- Go 1.24+
+- Go 1.26+
 - GCC (for DuckDB CGO)
 
 ```bash
