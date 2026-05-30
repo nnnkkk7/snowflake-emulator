@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -66,7 +65,7 @@ func NewSessionHandler(sessionMgr *session.Manager, repo *metadata.Repository) *
 // Login handles login requests with gosnowflake protocol.
 func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req types.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		sendError(w, apierror.NewSnowflakeError(apierror.CodeInvalidParameter, "Invalid request body"))
 		return
 	}
@@ -91,13 +90,22 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Ensure database exists (try to get it, create if not found)
-	_, err := h.repo.GetDatabaseByName(ctx, database)
+	db, err := h.repo.GetDatabaseByName(ctx, database)
 	if err != nil {
-		// Database doesn't exist, create it
-		_, err = h.repo.CreateDatabase(ctx, database, "Auto-created database")
+		db, err = h.repo.CreateDatabase(ctx, database, "Auto-created database")
 		if err != nil {
 			sendError(w, apierror.NewSnowflakeError(apierror.CodeInternalError, "Failed to initialize database"))
 			return
+		}
+	}
+
+	// Ensure default schema exists so JDBC metadata and DBeaver navigation work.
+	if _, err := h.repo.GetSchemaByName(ctx, db.ID, schema); err != nil {
+		if _, err := h.repo.CreateSchema(ctx, db.ID, schema, ""); err != nil {
+			if !strings.Contains(err.Error(), "already exists") {
+				sendError(w, apierror.NewSnowflakeError(apierror.CodeInternalError, "Failed to initialize schema"))
+				return
+			}
 		}
 	}
 
@@ -108,33 +116,22 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build parameter bindings from default session parameters
+	// Build parameter bindings from default session parameters.
+	// JDBC requires AUTOCOMMIT as a boolean; missing it causes a client-side NPE.
 	defaultParams := config.DefaultSessionParameters()
 	parameters := []types.ParameterBinding{
+		{Name: string(config.ParamAutocommit), Value: true},
 		{Name: string(config.ParamTimezone), Value: defaultParams[config.ParamTimezone]},
 		{Name: string(config.ParamTimestampOutputFormat), Value: defaultParams[config.ParamTimestampOutputFormat]},
-		{Name: string(config.ParamClientSessionKeepAlive), Value: defaultParams[config.ParamClientSessionKeepAlive]},
+		{Name: string(config.ParamClientSessionKeepAlive), Value: false},
 		{Name: string(config.ParamQueryTag), Value: defaultParams[config.ParamQueryTag]},
 		{Name: string(config.ParamGoQueryResultFormat), Value: defaultParams[config.ParamGoQueryResultFormat]},
+		{Name: string(config.ParamJDBCQueryResultFormat), Value: defaultParams[config.ParamJDBCQueryResultFormat]},
 	}
 
 	// Add user-provided session parameters
 	for k, v := range req.Data.SessionParams {
-		// Convert any type to string for the response
-		var strValue string
-		switch val := v.(type) {
-		case string:
-			strValue = val
-		case bool:
-			if val {
-				strValue = "true"
-			} else {
-				strValue = "false"
-			}
-		default:
-			strValue = fmt.Sprintf("%v", v)
-		}
-		parameters = append(parameters, types.ParameterBinding{Name: k, Value: strValue})
+		parameters = append(parameters, types.ParameterBinding{Name: k, Value: v})
 	}
 
 	// Build success response
@@ -146,6 +143,9 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 			ValidityInSeconds:       sess.ValidityInSeconds,
 			MasterValidityInSeconds: sess.MasterValidityInSeconds,
 			SessionID:               sess.ID,
+			DisplayUserName:         req.Data.LoginName,
+			ServerVersion:           config.DefaultServerVersion,
+			HealthCheckInterval:     45,
 			Parameters:              parameters,
 			SessionInfo: types.SessionInfo{
 				DatabaseName:  database,

@@ -862,7 +862,7 @@ func TestIntegration_QueryHistory(t *testing.T) {
 	}
 
 	// Query 2: Successful DDL (use simple table name that DuckDB can handle)
-	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)")
+	_, err = executor.ExecuteWithHistory(ctx, sessionID, queryID2, "CREATE TABLE history_test_table (id INTEGER)", "", "")
 	if err != nil {
 		t.Fatalf("Query 2 failed: %v", err)
 	}

@@ -297,12 +297,21 @@ func (e *Executor) ExecuteWithBindings(ctx context.Context, sql string, bindings
 
 // Execute executes a non-query SQL statement (INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
 func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error) {
+	return e.ExecuteInSession(ctx, sql, "", "")
+}
+
+// ExecuteInSession executes a statement using the session database/schema as defaults.
+func (e *Executor) ExecuteInSession(ctx context.Context, sql, database, schema string) (*ExecResult, error) {
 	// Use classifier to detect DDL statements that need metadata tracking
 	classifier := NewClassifier()
 
+	if classifier.IsCreateSchema(sql) {
+		return e.executeCreateSchema(ctx, sql, database)
+	}
+
 	// For CREATE TABLE, we need to register it in metadata
 	if classifier.IsCreateTable(sql) {
-		return e.executeCreateTable(ctx, sql)
+		return e.executeCreateTable(ctx, sql, database, schema)
 	}
 
 	// For DROP TABLE, we need to remove it from metadata
@@ -355,26 +364,6 @@ func (e *Executor) executeRaw(ctx context.Context, sql string) (*ExecResult, err
 	}, nil
 }
 
-// executeCreateTable handles CREATE TABLE statements with metadata registration.
-func (e *Executor) executeCreateTable(ctx context.Context, sql string) (*ExecResult, error) {
-	// Execute the CREATE TABLE in DuckDB first
-	translatedSQL, err := e.translator.Translate(sql)
-	if err != nil {
-		return nil, fmt.Errorf("translation error: %w", err)
-	}
-
-	if _, err := e.mgr.Exec(ctx, translatedSQL); err != nil {
-		return nil, fmt.Errorf("create table execution error: %w", err)
-	}
-
-	// Note: In a full implementation, we would parse the CREATE TABLE statement
-	// and register it in metadata. For now, we just execute it.
-	// This would require SQL parsing to extract table name, columns, etc.
-
-	return &ExecResult{
-		RowsAffected: 0,
-	}, nil
-}
 
 // executeDropTable handles DROP TABLE statements with metadata cleanup.
 func (e *Executor) executeDropTable(ctx context.Context, sql string) (*ExecResult, error) {
@@ -513,7 +502,7 @@ func convertValue(val interface{}) interface{} {
 }
 
 // ExecuteWithHistory wraps Execute with query history tracking.
-func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string) (*ExecResult, error) {
+func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql, database, schema string) (*ExecResult, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -523,7 +512,7 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 	}
 
 	// Execute the query
-	result, execErr := e.Execute(ctx, sql)
+	result, execErr := e.ExecuteInSession(ctx, sql, database, schema)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()

@@ -152,6 +152,13 @@ func (c *Classifier) IsCreateTable(sql string) bool {
 	return strings.HasPrefix(upperSQL, "CREATE TABLE")
 }
 
+// IsCreateSchema checks if the SQL is a CREATE SCHEMA statement.
+func (c *Classifier) IsCreateSchema(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "CREATE SCHEMA") ||
+		strings.HasPrefix(upperSQL, "CREATE OR REPLACE SCHEMA")
+}
+
 // IsDropTable checks if the SQL is a DROP TABLE statement.
 func (c *Classifier) IsDropTable(sql string) bool {
 	upperSQL := strings.ToUpper(strings.TrimSpace(sql))

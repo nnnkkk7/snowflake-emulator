@@ -50,9 +50,9 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := sess.ID
 
-	// Parse request using new gosnowflake protocol
-	var req types.QueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Parse request using gosnowflake / JDBC protocol
+	req, err := parseQueryRequest(r)
+	if err != nil {
 		sendError(w, apierror.NewSnowflakeError(apierror.CodeInvalidParameter, "Invalid request body"))
 		return
 	}
@@ -62,13 +62,15 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.SQLText = query.NormalizeJDBCMetadataSQL(req.SQLText)
+
 	// Classify the SQL statement
 	classification := query.ClassifySQL(req.SQLText)
 
 	if classification.IsQuery {
 		h.executeQuery(w, ctx, sessionID, req.SQLText)
 	} else {
-		h.executeDML(w, ctx, sessionID, req.SQLText)
+		h.executeDML(w, ctx, sess, req.SQLText)
 	}
 }
 
@@ -113,14 +115,14 @@ func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, 
 }
 
 // executeDML executes a DML/DDL statement with gosnowflake protocol.
-func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
+func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sess *session.Session, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	// Generate unique query ID
 	queryID := generateQueryID()
 
 	// Execute with history tracking
-	result, err := h.executor.ExecuteWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText)
+	result, err := h.executor.ExecuteWithHistory(ctx, fmt.Sprintf("%d", sess.ID), queryID, sqlText, sess.Database, sess.CurrentSchema)
 	if err != nil {
-		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, "statement execution failed", err))
+		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, fmt.Sprintf("statement execution failed: %v", err), err))
 		return
 	}
 
@@ -148,7 +150,7 @@ func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, se
 // AbortQuery handles query abort requests.
 func (h *QueryHandler) AbortQuery(w http.ResponseWriter, r *http.Request) {
 	var req types.AbortRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		sendError(w, apierror.NewSnowflakeError(apierror.CodeInvalidParameter, "Invalid request body"))
 		return
 	}

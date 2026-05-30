@@ -276,7 +276,7 @@ func TestTranslator_StringFunctions(t *testing.T) {
 		{
 			name:     "SUBSTR",
 			input:    "SELECT SUBSTR(text, 1, 10) FROM documents",
-			expected: "select SUBSTR(text, 1, 10) from documents",
+			expected: "select substr(text, 1, 10) from documents",
 			wantErr:  false,
 		},
 		{
@@ -505,7 +505,7 @@ func TestTranslator_PARSE_JSON(t *testing.T) {
 		{
 			name:     "PARSE_JSONWithLiteral",
 			input:    `SELECT PARSE_JSON('{"key": "value"}') FROM dual`,
-			expected: `select CAST('{\"key\": \"value\"}' AS JSON)`,
+			expected: `select CAST('{"key": "value"}' AS JSON)`,
 			wantErr:  false,
 		},
 		{
@@ -722,7 +722,7 @@ func TestTranslator_OBJECT_CONSTRUCT(t *testing.T) {
 }
 
 // TestTranslator_FLATTEN tests FLATTEN function translation.
-// Note: FLATTEN with => syntax is not supported by vitess-sqlparser,
+// Note: FLATTEN with => syntax is not supported by the SQL parser,
 // so it falls back to original SQL (graceful degradation).
 // Simple FLATTEN(array) → UNNEST(array) for DuckDB
 func TestTranslator_FLATTEN(t *testing.T) {
@@ -1012,13 +1012,13 @@ func TestTranslator_EdgeCases(t *testing.T) {
 		{
 			name:     "FunctionInGROUPBY",
 			input:    "SELECT IFF(status, 'active', 'inactive'), COUNT(*) FROM users GROUP BY IFF(status, 'active', 'inactive')",
-			expected: "select IF(status, 'active', 'inactive'), COUNT(*) from users group by IF(status, 'active', 'inactive')",
+			expected: "select IF(status, 'active', 'inactive'), count(*) from users group by IF(status, 'active', 'inactive')",
 			wantErr:  false,
 		},
 		{
 			name:     "FunctionInHAVING",
 			input:    "SELECT category, COUNT(*) FROM items GROUP BY category HAVING NVL(COUNT(*), 0) > 10",
-			expected: "select category, COUNT(*) from items group by category having COALESCE(COUNT(*), 0) > 10",
+			expected: "select category, count(*) from items group by category having COALESCE(count(*), 0) > 10",
 			wantErr:  false,
 		},
 		{
