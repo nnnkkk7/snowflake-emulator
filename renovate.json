@@ -16,11 +16,22 @@
   "rebaseWhen": "conflicted",
   "rangeStrategy": "bump",
   "postUpdateOptions": ["gomodTidy"],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
+  "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
       "matchManagers": ["gomod"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "go dependencies (non-major)"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": false,
+      "groupName": "go security patches"
     },
     {
       "matchManagers": ["github-actions"],

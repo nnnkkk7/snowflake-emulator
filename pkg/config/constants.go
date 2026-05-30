@@ -37,20 +37,25 @@ type SessionParameter string
 
 // Session parameter names.
 const (
-	ParamTimezone               SessionParameter = "TIMEZONE"
-	ParamTimestampOutputFormat  SessionParameter = "TIMESTAMP_OUTPUT_FORMAT"
-	ParamClientSessionKeepAlive SessionParameter = "CLIENT_SESSION_KEEP_ALIVE"
-	ParamQueryTag               SessionParameter = "QUERY_TAG"
-	ParamGoQueryResultFormat    SessionParameter = "GO_QUERY_RESULT_FORMAT"
+	ParamAutocommit               SessionParameter = "AUTOCOMMIT"
+	ParamTimezone                 SessionParameter = "TIMEZONE"
+	ParamTimestampOutputFormat    SessionParameter = "TIMESTAMP_OUTPUT_FORMAT"
+	ParamClientSessionKeepAlive   SessionParameter = "CLIENT_SESSION_KEEP_ALIVE"
+	ParamQueryTag                 SessionParameter = "QUERY_TAG"
+	ParamGoQueryResultFormat      SessionParameter = "GO_QUERY_RESULT_FORMAT"
+	ParamJDBCQueryResultFormat    SessionParameter = "JDBC_QUERY_RESULT_FORMAT"
 )
+
+// DefaultServerVersion is reported to JDBC clients during login.
+const DefaultServerVersion = "8.0.0"
 
 // DefaultSessionParameters returns the default session parameters.
 func DefaultSessionParameters() map[SessionParameter]string {
 	return map[SessionParameter]string{
-		ParamTimezone:               DefaultTimezone,
-		ParamTimestampOutputFormat:  DefaultTimestampOutputFormat,
-		ParamClientSessionKeepAlive: DefaultClientSessionKeepAlive,
-		ParamQueryTag:               DefaultQueryTag,
-		ParamGoQueryResultFormat:    QueryResultFormatJSON,
+		ParamTimezone:              DefaultTimezone,
+		ParamTimestampOutputFormat: DefaultTimestampOutputFormat,
+		ParamQueryTag:              DefaultQueryTag,
+		ParamGoQueryResultFormat:   QueryResultFormatJSON,
+		ParamJDBCQueryResultFormat: QueryResultFormatJSON,
 	}
 }
