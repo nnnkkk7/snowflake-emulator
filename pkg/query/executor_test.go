@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -688,5 +689,71 @@ func TestTransactionClassifier(t *testing.T) {
 				t.Errorf("IsRollback(%q) = %v, want %v", tt.sql, got, tt.isRollback)
 			}
 		})
+	}
+}
+
+func TestExecutorApplyBindingsSupportsGosnowflakeVPlaceholders(t *testing.T) {
+	executor := &Executor{}
+
+	sqlText := `
+		SELECT COLUMN_NAME
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = :v1
+		  AND TABLE_NAME = :v2
+	`
+
+	bindings := map[string]*BindingValue{
+		"1": {
+			Type:  "TEXT",
+			Value: "MAIN",
+		},
+		"2": {
+			Type:  "TEXT",
+			Value: "E2E_TEST",
+		},
+	}
+
+	got, err := executor.applyBindings(sqlText, bindings)
+	if err != nil {
+		t.Fatalf("applyBindings failed: %v", err)
+	}
+
+	if strings.Contains(got, ":v1") || strings.Contains(got, ":v2") {
+		t.Fatalf("expected :v placeholders to be replaced, got: %s", got)
+	}
+
+	if !strings.Contains(got, "TABLE_SCHEMA = 'MAIN'") {
+		t.Fatalf("expected schema binding to be replaced, got: %s", got)
+	}
+
+	if !strings.Contains(got, "TABLE_NAME = 'E2E_TEST'") {
+		t.Fatalf("expected table binding to be replaced, got: %s", got)
+	}
+}
+
+func TestExecutorApplyBindingsSupportsVKeys(t *testing.T) {
+	executor := &Executor{}
+
+	sqlText := `SELECT * FROM T WHERE A = :v1 AND B = :v2`
+
+	bindings := map[string]*BindingValue{
+		"v1": {
+			Type:  "TEXT",
+			Value: "foo",
+		},
+		"v2": {
+			Type:  "TEXT",
+			Value: "bar",
+		},
+	}
+
+	got, err := executor.applyBindings(sqlText, bindings)
+	if err != nil {
+		t.Fatalf("applyBindings failed: %v", err)
+	}
+
+	expected := `SELECT * FROM T WHERE A = 'foo' AND B = 'bar'`
+	if got != expected {
+		t.Fatalf("unexpected SQL:\nexpected: %s\nactual:   %s", expected, got)
 	}
 }

@@ -146,40 +146,79 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 }
 
 // applyBindings replaces :N placeholders with actual values from bindings.
-// Snowflake uses :1, :2, etc. for positional parameters.
-func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
-	// Get binding keys sorted in descending order to avoid :1 replacing :10, :11, etc.
-	keys := make([]int, 0, len(bindings))
-	for k := range bindings {
-		pos, err := strconv.Atoi(k)
-		if err != nil {
-			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
+// Snowflake uses :1, :2 or :v1, :v2, etc. for positional parameters.
+func (e *Executor) applyBindings(
+	sql string,
+	bindings map[string]*QueryBindingValue,
+) (string, error) {
+	normalized := make(map[string]*QueryBindingValue, len(bindings))
+
+	for key, binding := range bindings {
+		normalizedKey := normalizeBindingKey(key)
+		if normalizedKey == "" {
+			return "", fmt.Errorf("invalid binding key %q", key)
 		}
+
+		normalized[normalizedKey] = binding
+	}
+
+	keys := make([]int, 0, len(normalized))
+	for key := range normalized {
+		pos, err := strconv.Atoi(key)
+		if err != nil {
+			return "", fmt.Errorf("invalid binding key %q: must be numeric after normalization", key)
+		}
+
 		keys = append(keys, pos)
 	}
+
 	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
 
 	result := sql
+
 	for _, pos := range keys {
 		key := strconv.Itoa(pos)
-		binding := bindings[key]
+		binding := normalized[key]
 		if binding == nil {
 			continue
 		}
 
-		placeholder := ":" + key
 		value, err := formatBindingValue(binding)
 		if err != nil {
 			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
 		}
 
-		result = strings.ReplaceAll(result, placeholder, value)
+		placeholders := []string{
+			":" + key,
+			":v" + key,
+			":V" + key,
+		}
+
+		for _, placeholder := range placeholders {
+			result = strings.ReplaceAll(result, placeholder, value)
+		}
 	}
 
-	// Also handle ? placeholders (positional, 1-based)
-	result = e.replaceQuestionMarkPlaceholders(result, bindings)
+	result = e.replaceQuestionMarkPlaceholders(result, normalized)
 
 	return result, nil
+}
+
+func normalizeBindingKey(key string) string {
+	key = strings.TrimSpace(key)
+	key = strings.TrimPrefix(key, ":")
+	key = strings.TrimPrefix(key, "v")
+	key = strings.TrimPrefix(key, "V")
+
+	if key == "" {
+		return ""
+	}
+
+	if _, err := strconv.Atoi(key); err != nil {
+		return ""
+	}
+
+	return key
 }
 
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.

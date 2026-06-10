@@ -65,34 +65,49 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	// Classify the SQL statement
 	classification := query.ClassifySQL(req.SQLText)
 
+	bindings := convertGosnowflakeBindings(req.Bindings)
+
 	if classification.IsQuery {
-		h.executeQuery(w, ctx, sessionID, req.SQLText)
+		h.executeQuery(w, ctx, sessionID, req.SQLText, bindings)
 	} else {
-		h.executeDML(w, ctx, sessionID, req.SQLText)
+		h.executeDML(w, ctx, sessionID, req.SQLText, bindings)
 	}
 }
 
 // executeQuery executes a SELECT query with gosnowflake protocol.
-func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
+func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string, bindings map[string]*query.BindingValue) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	// Generate unique query ID
 	queryID := generateQueryID()
 
-	// Execute query with history tracking
-	result, err := h.executor.QueryWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText)
+	var result *query.Result
+	var err error
+
+	if len(bindings) > 0 {
+		result, err = h.executor.QueryWithBindings(ctx, sqlText, bindings)
+	} else {
+		result, err = h.executor.QueryWithHistory(
+			ctx,
+			fmt.Sprintf("%d", sessionID),
+			queryID,
+			sqlText,
+		)
+	}
+
 	if err != nil {
-		// Use apierror for error classification
-		// Include the underlying error in the message for debugging
-		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, fmt.Sprintf("query execution failed: %v", err), err))
+		sendError(
+			w,
+			apierror.WrapError(
+				apierror.CodeSQLExecutionError,
+				fmt.Sprintf("query execution failed: %v", err),
+				err,
+			),
+		)
 		return
 	}
 
-	// Use column types captured from actual query result
 	rowType := result.ColumnTypes
-
-	// Convert all values to strings for gosnowflake protocol
 	rowSet := convertRowsToStrings(result.Rows)
 
-	// Build success response
 	resp := types.QueryResponse{
 		Success: true,
 		Data: &types.QuerySuccessData{
@@ -113,21 +128,38 @@ func (h *QueryHandler) executeQuery(w http.ResponseWriter, ctx context.Context, 
 }
 
 // executeDML executes a DML/DDL statement with gosnowflake protocol.
-func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string) { //nolint:revive // context-as-argument: keeping w first for handler consistency
+func (h *QueryHandler) executeDML(w http.ResponseWriter, ctx context.Context, sessionID int64, sqlText string, bindings map[string]*query.BindingValue) { //nolint:revive // context-as-argument: keeping w first for handler consistency
 	// Generate unique query ID
 	queryID := generateQueryID()
 
-	// Execute with history tracking
-	result, err := h.executor.ExecuteWithHistory(ctx, fmt.Sprintf("%d", sessionID), queryID, sqlText)
+	var result *query.ExecResult
+	var err error
+
+	if len(bindings) > 0 {
+		result, err = h.executor.ExecuteWithBindings(ctx, sqlText, bindings)
+	} else {
+		result, err = h.executor.ExecuteWithHistory(
+			ctx,
+			fmt.Sprintf("%d", sessionID),
+			queryID,
+			sqlText,
+		)
+	}
+
 	if err != nil {
-		sendError(w, apierror.WrapError(apierror.CodeSQLExecutionError, "statement execution failed", err))
+		sendError(
+			w,
+			apierror.WrapError(
+				apierror.CodeSQLExecutionError,
+				"statement execution failed",
+				err,
+			),
+		)
 		return
 	}
 
-	// Get statement type ID using the classifier
 	stmtTypeID := query.GetStatementTypeID(sqlText)
 
-	// Build success response
 	resp := types.QueryResponse{
 		Success: true,
 		Data: &types.QuerySuccessData{
@@ -190,4 +222,58 @@ func convertRowsToStrings(rows [][]interface{}) [][]string {
 		result[i] = strRow
 	}
 	return result
+}
+
+func convertGosnowflakeBindings(
+	input map[string]interface{},
+) map[string]*query.BindingValue {
+	if len(input) == 0 {
+		return nil
+	}
+
+	result := make(map[string]*query.BindingValue, len(input))
+
+	for key, raw := range input {
+		switch v := raw.(type) {
+		case map[string]interface{}:
+			binding := &query.BindingValue{
+				Type:  stringFromAny(v["type"]),
+				Value: stringFromAny(v["value"]),
+			}
+
+			if binding.Type == "" {
+				binding.Type = stringFromAny(v["TYPE"])
+			}
+			if binding.Value == "" {
+				binding.Value = stringFromAny(v["VALUE"])
+			}
+
+			if binding.Type == "" {
+				binding.Type = "TEXT"
+			}
+
+			result[key] = binding
+
+		default:
+			result[key] = &query.BindingValue{
+				Type:  "TEXT",
+				Value: fmt.Sprint(v),
+			}
+		}
+	}
+
+	return result
+}
+
+func stringFromAny(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	default:
+		return fmt.Sprint(v)
+	}
 }
