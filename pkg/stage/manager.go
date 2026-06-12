@@ -2,6 +2,7 @@
 package stage
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -131,31 +132,24 @@ func (m *Manager) PutFile(ctx context.Context, schemaID, stageName, fileName str
 
 // GetFile retrieves a file from a stage.
 func (m *Manager) GetFile(ctx context.Context, schemaID, stageName, fileName string) (io.ReadCloser, error) {
-	stage, err := m.repo.GetStageByName(ctx, schemaID, stageName)
+	stagePath := filepath.Join(m.stageDir, schemaID, strings.ToUpper(stageName), fileName)
+
+	file, err := os.Open(stagePath)
 	if err != nil {
 		return nil, err
 	}
 
-	if strings.ToUpper(stage.StageType) != "INTERNAL" && stage.StageType != "" {
-		return nil, fmt.Errorf("GET operation only supported for internal stages")
-	}
-
-	stageDir := m.getStageDir(schemaID, stage.Name)
-
-	// Sanitize file name to prevent directory traversal
-	cleanName := filepath.Clean(fileName)
-	if strings.HasPrefix(cleanName, "..") || filepath.IsAbs(cleanName) {
-		return nil, fmt.Errorf("invalid file name: %s", fileName)
-	}
-
-	filePath := filepath.Join(stageDir, cleanName)
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file %s not found in stage %s", fileName, stageName)
+	if strings.HasSuffix(strings.ToLower(fileName), ".gz") {
+		gz, err := gzip.NewReader(file)
+		if err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 		}
-		return nil, fmt.Errorf("failed to open file: %w", err)
+
+		return &multiReadCloser{
+			Reader:  gz,
+			closers: []io.Closer{gz, file},
+		}, nil
 	}
 
 	return file, nil
@@ -265,4 +259,21 @@ func (m *Manager) GetStageDirectory(ctx context.Context, schemaID, stageName str
 	}
 
 	return m.getStageDir(schemaID, stage.Name), nil
+}
+
+type multiReadCloser struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (m *multiReadCloser) Close() error {
+	var firstErr error
+
+	for _, closer := range m.closers {
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
 }

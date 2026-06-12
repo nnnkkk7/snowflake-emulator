@@ -112,10 +112,24 @@ type QuerySuccessData struct {
 	SQLState          string           `json:"sqlState,omitempty"`
 	StatementTypeID   int64            `json:"statementTypeId"`
 	RowType           []ColumnMetadata `json:"rowtype,omitempty"`
-	RowSet            [][]string       `json:"rowset,omitempty"`
+	RowSet            [][]interface{}  `json:"rowset,omitempty"`
 	Total             int64            `json:"total"`
 	Returned          int64            `json:"returned"`
 	QueryResultFormat string           `json:"queryResultFormat"`
+
+	Command           string     `json:"command,omitempty"`
+	SrcLocations      []string   `json:"src_locations,omitempty"`
+	StageInfo         *StageInfo `json:"stageInfo,omitempty"`
+	AutoCompress      bool       `json:"autoCompress,omitempty"`
+	SourceCompression string     `json:"sourceCompression,omitempty"`
+	Overwrite         bool       `json:"overwrite,omitempty"`
+	Parallel          int64      `json:"parallel,omitempty"`
+}
+
+type StageInfo struct {
+	LocationType string `json:"locationType,omitempty"`
+	Location     string `json:"location,omitempty"`
+	Path         string `json:"path,omitempty"`
 }
 
 // ColumnMetadata describes a result column's type information.

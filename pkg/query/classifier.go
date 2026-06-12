@@ -231,3 +231,23 @@ func IsRollback(sql string) bool {
 	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
 	return strings.HasPrefix(upperSQL, "ROLLBACK")
 }
+
+func (c *Classifier) IsCreateStage(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "CREATE STAGE") ||
+		strings.HasPrefix(upperSQL, "CREATE OR REPLACE STAGE") ||
+		strings.HasPrefix(upperSQL, "CREATE STAGE IF NOT EXISTS")
+}
+
+func (c *Classifier) IsPut(sql string) bool {
+	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(upperSQL, "PUT ")
+}
+
+func IsCreateStage(sql string) bool {
+	return DefaultClassifier.IsCreateStage(sql)
+}
+
+func IsPut(sql string) bool {
+	return DefaultClassifier.IsPut(sql)
+}

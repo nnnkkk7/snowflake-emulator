@@ -71,19 +71,40 @@ func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 	var execResult *query.ExecResult
 	var err error
 
+	execCtx := query.ExecutionContext{
+		Database:      req.Database,
+		CurrentSchema: req.Schema,
+	}
+
 	if classification.IsQuery {
 		// Handle SELECT, SHOW, DESCRIBE, EXPLAIN
 		if len(bindings) > 0 {
-			result, err = h.executor.QueryWithBindings(ctx, req.Statement, bindings)
+			result, err = h.executor.QueryWithBindings(
+				ctx,
+				req.Statement,
+				bindings,
+			)
 		} else {
-			result, err = h.executor.Query(ctx, req.Statement)
+			result, err = h.executor.Query(
+				ctx,
+				req.Statement,
+			)
 		}
 	} else {
 		// Handle DDL (CREATE, DROP, ALTER) and DML (INSERT, UPDATE, DELETE)
 		if len(bindings) > 0 {
-			execResult, err = h.executor.ExecuteWithBindings(ctx, req.Statement, bindings)
+			execResult, err = h.executor.ExecuteWithBindingsAndContext(
+				ctx,
+				execCtx,
+				req.Statement,
+				bindings,
+			)
 		} else {
-			execResult, err = h.executor.Execute(ctx, req.Statement)
+			execResult, err = h.executor.ExecuteWithContext(
+				ctx,
+				execCtx,
+				req.Statement,
+			)
 		}
 	}
 

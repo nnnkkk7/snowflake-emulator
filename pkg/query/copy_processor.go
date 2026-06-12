@@ -2,6 +2,7 @@
 package query
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -17,18 +18,20 @@ import (
 
 // CopyStatement represents a parsed COPY INTO statement.
 type CopyStatement struct {
-	TargetTable    string
-	TargetDatabase string
-	TargetSchema   string
-	StageName      string
-	StageSchemaID  string
-	StagePath      string
-	FileFormat     FileFormatOptions
-	Files          []string // Specific files to load
-	Pattern        string   // File pattern
-	OnError        string   // CONTINUE, SKIP_FILE, ABORT
-	PurgeFiles     bool     // Whether to purge files after loading
-	ValidationMode bool     // Whether to validate only
+	TargetTable       string
+	TargetDatabase    string
+	TargetSchema      string
+	TargetColumns     []string
+	SelectExpressions []string
+	StageName         string
+	StageSchemaID     string
+	StagePath         string
+	FileFormat        FileFormatOptions
+	Files             []string // Specific files to load
+	Pattern           string   // File pattern
+	OnError           string   // CONTINUE, SKIP_FILE, ABORT
+	PurgeFiles        bool     // Whether to purge files after loading
+	ValidationMode    bool     // Whether to validate only
 }
 
 // FileFormatOptions contains file format settings for COPY.
@@ -49,6 +52,7 @@ type FileFormatOptions struct {
 // Stored in CopyProcessor to avoid global state and enable heap allocation.
 type copyPatterns struct {
 	copyInto        *regexp.Regexp
+	copyIntoSelect  *regexp.Regexp
 	fileFormat      *regexp.Regexp
 	pattern         *regexp.Regexp
 	onError         *regexp.Regexp
@@ -61,7 +65,10 @@ type copyPatterns struct {
 // newCopyPatterns creates pre-compiled regex patterns.
 func newCopyPatterns() *copyPatterns {
 	return &copyPatterns{
-		copyInto:        regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/\S*)?`),
+		copyInto: regexp.MustCompile(`(?i)COPY\s+INTO\s+([^\s(]+)\s+FROM\s+@([^\s/]+)(/\S*)?`),
+
+		copyIntoSelect: regexp.MustCompile(`(?is)^COPY\s+INTO\s+([^\s(]+)\s*(?:\((.*?)\))?\s+FROM\s*\(\s*SELECT\s+(.*?)\s+FROM\s+(@[^\s)]+)\s*\)\s*FILE_FORMAT\s*=\s*\(([^)]*)\)\s*$`),
+
 		fileFormat:      regexp.MustCompile(`(?i)FILE_FORMAT\s*=\s*\(([^)]+)\)`),
 		pattern:         regexp.MustCompile(`(?i)PATTERN\s*=\s*'([^']+)'`),
 		onError:         regexp.MustCompile(`(?i)ON_ERROR\s*=\s*(\w+)`),
@@ -109,6 +116,10 @@ func NewCopyProcessor(stageMgr *stage.Manager, repo *metadata.Repository, execut
 // ParseCopyStatement parses a COPY INTO SQL statement.
 func (h *CopyProcessor) ParseCopyStatement(sql string) (*CopyStatement, error) {
 	sql = strings.TrimSpace(sql)
+
+	if stmt, err := h.parseCopyIntoSelect(sql); err == nil {
+		return stmt, nil
+	}
 
 	// Match COPY INTO table FROM @stage[/path]
 	matches := h.patterns.copyInto.FindStringSubmatch(sql)
@@ -334,7 +345,7 @@ func (h *CopyProcessor) loadCSVFile(ctx context.Context, stmt *CopyStatement, sc
 	}
 
 	// Build INSERT statement using centralized table naming
-	tableName := h.tableNamer.BuildDuckDBTableName(stmt.TargetDatabase, stmt.TargetSchema, stmt.TargetTable)
+	tableName := buildDuckDBQualifiedTableName(stmt.TargetSchema, stmt.TargetTable)
 
 	var rowsInserted int64
 	for _, record := range records {
@@ -388,32 +399,9 @@ func (h *CopyProcessor) loadJSONFile(ctx context.Context, stmt *CopyStatement, s
 		return 0, fmt.Errorf("failed to read JSON file: %w", err)
 	}
 
-	// Parse JSON
-	var data interface{}
-	if err := json.Unmarshal(content, &data); err != nil {
-		return 0, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	// Handle array of objects
-	var records []map[string]interface{}
-	switch v := data.(type) {
-	case []interface{}:
-		if stmt.FileFormat.StripOuterArray {
-			for _, item := range v {
-				if obj, ok := item.(map[string]interface{}); ok {
-					records = append(records, obj)
-				}
-			}
-		} else {
-			// Each array element as a single VARIANT column
-			for _, item := range v {
-				records = append(records, map[string]interface{}{"$1": item})
-			}
-		}
-	case map[string]interface{}:
-		records = append(records, v)
-	default:
-		return 0, fmt.Errorf("unsupported JSON structure")
+	records, err := parseJSONRecords(content, stmt.FileFormat.StripOuterArray)
+	if err != nil {
+		return 0, err
 	}
 
 	if len(records) == 0 {
@@ -421,25 +409,304 @@ func (h *CopyProcessor) loadJSONFile(ctx context.Context, stmt *CopyStatement, s
 	}
 
 	// Build table name using centralized table naming
-	tableName := h.tableNamer.BuildDuckDBTableName(stmt.TargetDatabase, stmt.TargetSchema, stmt.TargetTable)
+	tableName := buildDuckDBQualifiedTableName(stmt.TargetSchema, stmt.TargetTable)
 
 	var rowsInserted int64
 	for _, record := range records {
-		// Convert record to JSON string for VARIANT column
-		jsonBytes, err := json.Marshal(record)
-		if err != nil {
-			return rowsInserted, fmt.Errorf("failed to serialize record: %w", err)
+		values := make([]string, 0)
+
+		if len(stmt.TargetColumns) > 0 && len(stmt.SelectExpressions) > 0 {
+			for _, expr := range stmt.SelectExpressions {
+				valueSQL, err := jsonSelectExpressionToSQLValue(expr, record)
+				if err != nil {
+					return rowsInserted, err
+				}
+
+				values = append(values, valueSQL)
+			}
+		} else {
+			jsonBytes, err := json.Marshal(record)
+			if err != nil {
+				return rowsInserted, fmt.Errorf("failed to serialize record: %w", err)
+			}
+
+			values = append(values, "'"+strings.ReplaceAll(string(jsonBytes), "'", "''")+"'")
 		}
 
-		// Insert as JSON/VARIANT
-		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES ('%s')", tableName, strings.ReplaceAll(string(jsonBytes), "'", "''"))
+		insertSQL := fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES (%s)",
+			tableName,
+			strings.Join(quoteColumnNames(stmt.TargetColumns), ", "),
+			strings.Join(values, ", "),
+		)
 
 		_, err = h.executor.executeRaw(ctx, insertSQL)
 		if err != nil {
 			return rowsInserted, fmt.Errorf("failed to insert JSON row: %w", err)
 		}
+
 		rowsInserted++
 	}
 
 	return rowsInserted, nil
+}
+
+func (h *CopyProcessor) parseCopyIntoSelect(sql string) (*CopyStatement, error) {
+	matches := h.patterns.copyIntoSelect.FindStringSubmatch(sql)
+	if len(matches) < 6 {
+		return nil, fmt.Errorf("invalid COPY INTO SELECT syntax")
+	}
+
+	targetTableRef := strings.TrimSpace(matches[1])
+	targetColumnsText := strings.TrimSpace(matches[2])
+	selectExpressionsText := strings.TrimSpace(matches[3])
+	stageLocation := strings.TrimSpace(matches[4])
+	fileFormatText := strings.TrimSpace(matches[5])
+
+	stmt := &CopyStatement{
+		FileFormat: FileFormatOptions{
+			Type:            "CSV",
+			FieldDelimiter:  ",",
+			RecordDelimiter: "\n",
+			SkipHeader:      0,
+		},
+		OnError: "ABORT",
+	}
+
+	// Target table
+	targetDatabase, targetSchema, targetTable := splitQualifiedObjectName(targetTableRef)
+	stmt.TargetDatabase = targetDatabase
+	stmt.TargetSchema = targetSchema
+	stmt.TargetTable = targetTable
+
+	// Target columns
+	if targetColumnsText != "" {
+		stmt.TargetColumns = cleanIdentList(splitCommaList(targetColumnsText))
+	}
+
+	// SELECT expressions
+	if selectExpressionsText != "" {
+		stmt.SelectExpressions = splitCommaList(selectExpressionsText)
+	}
+
+	// Stage location
+	stageObject, stagePath := splitStageRef(stageLocation)
+	_, _, stageName := splitQualifiedObjectName(stageObject)
+
+	stmt.StageName = stageName
+	stmt.StagePath = stagePath
+
+	h.parseFileFormatOptions(&stmt.FileFormat, fileFormatText)
+
+	return stmt, nil
+}
+
+func splitCommaList(input string) []string {
+	var result []string
+	var current strings.Builder
+
+	depth := 0
+	inSingleQuote := false
+	inDoubleQuote := false
+
+	for _, r := range input {
+		switch r {
+		case '\'':
+			if !inDoubleQuote {
+				inSingleQuote = !inSingleQuote
+			}
+			current.WriteRune(r)
+
+		case '"':
+			if !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+			}
+			current.WriteRune(r)
+
+		case '(':
+			if !inSingleQuote && !inDoubleQuote {
+				depth++
+			}
+			current.WriteRune(r)
+
+		case ')':
+			if !inSingleQuote && !inDoubleQuote && depth > 0 {
+				depth--
+			}
+			current.WriteRune(r)
+
+		case ',':
+			if !inSingleQuote && !inDoubleQuote && depth == 0 {
+				value := strings.TrimSpace(current.String())
+				if value != "" {
+					result = append(result, value)
+				}
+				current.Reset()
+			} else {
+				current.WriteRune(r)
+			}
+
+		default:
+			current.WriteRune(r)
+		}
+	}
+
+	value := strings.TrimSpace(current.String())
+	if value != "" {
+		result = append(result, value)
+	}
+
+	return result
+}
+
+func cleanIdentList(values []string) []string {
+	result := make([]string, 0, len(values))
+
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"`)
+		value = strings.ToUpper(value)
+
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+
+	return result
+}
+
+func jsonSelectExpressionToSQLValue(expr string, record map[string]interface{}) (string, error) {
+	expr = strings.TrimSpace(expr)
+
+	if strings.EqualFold(expr, "CURRENT_TIMESTAMP()") {
+		return "CURRENT_TIMESTAMP", nil
+	}
+
+	re := regexp.MustCompile(`(?i)^\$1\s*:\s*"([^"]+)"$`)
+	matches := re.FindStringSubmatch(expr)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("unsupported JSON select expression: %s", expr)
+	}
+
+	fieldName := matches[1]
+
+	value, exists := record[fieldName]
+	if !exists {
+		return ValueNull, nil
+	}
+
+	return jsonValueToSQLLiteral(value), nil
+}
+
+func jsonValueToSQLLiteral(value interface{}) string {
+	if value == nil {
+		return ValueNull
+	}
+
+	switch v := value.(type) {
+	case string:
+		return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+
+	case bool:
+		if v {
+			return "TRUE"
+		}
+		return "FALSE"
+
+	default:
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return ValueNull
+		}
+
+		return "'" + strings.ReplaceAll(string(jsonBytes), "'", "''") + "'"
+	}
+}
+
+func parseJSONRecords(content []byte, stripOuterArray bool) ([]map[string]interface{}, error) {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 {
+		return nil, nil
+	}
+
+	var records []map[string]interface{}
+
+	// First try normal JSON: object or array.
+	var data interface{}
+	if err := json.Unmarshal(content, &data); err == nil {
+		switch v := data.(type) {
+		case []interface{}:
+			if stripOuterArray {
+				for _, item := range v {
+					if obj, ok := item.(map[string]interface{}); ok {
+						records = append(records, obj)
+					}
+				}
+			} else {
+				for _, item := range v {
+					records = append(records, map[string]interface{}{"$1": item})
+				}
+			}
+
+		case map[string]interface{}:
+			records = append(records, v)
+
+		default:
+			return nil, fmt.Errorf("unsupported JSON structure")
+		}
+
+		return records, nil
+	}
+
+	// Fallback: NDJSON / JSON Lines.
+	lines := bytes.Split(content, []byte("\n"))
+
+	for lineNumber, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+
+		var record map[string]interface{}
+		if err := json.Unmarshal(line, &record); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON line %d: %w", lineNumber+1, err)
+		}
+
+		records = append(records, record)
+	}
+
+	return records, nil
+}
+
+func buildDuckDBQualifiedTableName(schemaName string, tableName string) string {
+	schemaName = normalizeSnowflakeIdent(schemaName)
+	tableName = normalizeSnowflakeIdent(tableName)
+
+	if schemaName == "" {
+		return quoteDuckDBIdent(tableName)
+	}
+
+	return quoteDuckDBIdent(schemaName) + "." + quoteDuckDBIdent(tableName)
+}
+
+func quoteColumnNames(columns []string) []string {
+	quoted := make([]string, 0, len(columns))
+
+	for _, col := range columns {
+		col = strings.TrimSpace(col)
+		col = strings.Trim(col, `"`)
+		if col == "" {
+			continue
+		}
+
+		quoted = append(quoted, quoteDuckDBIdent(strings.ToUpper(col)))
+	}
+
+	return quoted
 }

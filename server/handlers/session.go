@@ -78,14 +78,20 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set default database/schema if not provided
-	database := req.Data.DatabaseName
+	database := strings.TrimSpace(req.Data.DatabaseName)
+	if database == "" {
+		database = strings.TrimSpace(r.URL.Query().Get("databaseName"))
+	}
 	if database == "" {
 		database = config.DefaultDatabase
 	}
 
-	schema := req.Data.SchemaName
-	if schema == "" {
-		schema = config.DefaultSchema
+	schemaName := strings.TrimSpace(req.Data.SchemaName)
+	if schemaName == "" {
+		schemaName = strings.TrimSpace(r.URL.Query().Get("schemaName"))
+	}
+	if schemaName == "" {
+		schemaName = config.DefaultSchema
 	}
 
 	ctx := r.Context()
@@ -102,7 +108,7 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session with master token support
-	sess, err := h.sessionMgr.CreateSession(ctx, req.Data.LoginName, database, schema)
+	sess, err := h.sessionMgr.CreateSession(ctx, req.Data.LoginName, database, schemaName)
 	if err != nil {
 		sendError(w, apierror.NewSnowflakeError(apierror.CodeInternalError, "Failed to create session"))
 		return
@@ -149,7 +155,7 @@ func (h *SessionHandler) Login(w http.ResponseWriter, r *http.Request) {
 			Parameters:              parameters,
 			SessionInfo: types.SessionInfo{
 				DatabaseName:  database,
-				SchemaName:    schema,
+				SchemaName:    schemaName,
 				WarehouseName: req.Data.WarehouseName,
 				RoleName:      req.Data.RoleName,
 			},
