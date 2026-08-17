@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.26
 #
 # Dockerfile
 # Multi-architecture build supporting AMD64 and ARM64
