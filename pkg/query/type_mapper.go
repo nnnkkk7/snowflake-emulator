@@ -20,17 +20,20 @@ type TypeMapper struct {
 
 // NewTypeMapper creates a new type mapper with default mappings.
 func NewTypeMapper() *TypeMapper {
+	// Map DuckDB types to Snowflake wire protocol type names.
+	// The Snowflake driver expects specific type names (e.g., FIXED not NUMBER,
+	// REAL not FLOAT) that match the SFDataType enum in the driver SDK.
 	return &TypeMapper{
 		typeMapping: map[string]string{
-			"BIGINT":       "NUMBER",
-			"INTEGER":      "NUMBER",
-			"INT":          "NUMBER",
-			"SMALLINT":     "NUMBER",
-			"TINYINT":      "NUMBER",
-			"HUGEINT":      "NUMBER",
-			"DOUBLE":       "FLOAT",
-			"FLOAT":        "FLOAT",
-			"REAL":         "FLOAT",
+			"BIGINT":       "FIXED",
+			"INTEGER":      "FIXED",
+			"INT":          "FIXED",
+			"SMALLINT":     "FIXED",
+			"TINYINT":      "FIXED",
+			"HUGEINT":      "FIXED",
+			"DOUBLE":       "REAL",
+			"FLOAT":        "REAL",
+			"REAL":         "REAL",
 			"VARCHAR":      TypeText,
 			"TEXT":         TypeText,
 			"STRING":       TypeText,
@@ -43,8 +46,8 @@ func NewTypeMapper() *TypeMapper {
 			"TIME":         "TIME",
 			"BOOLEAN":      "BOOLEAN",
 			"BOOL":         "BOOLEAN",
-			"DECIMAL":      "NUMBER",
-			"NUMERIC":      "NUMBER",
+			"DECIMAL":      "FIXED",
+			"NUMERIC":      "FIXED",
 			"BLOB":         "BINARY",
 			"BYTEA":        "BINARY",
 			"UUID":         TypeText,

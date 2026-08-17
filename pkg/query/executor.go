@@ -22,6 +22,8 @@ var (
 	timeRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d+)?$`)
 	// Timestamp format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS with optional timezone
 	timestampRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$`)
+	// Question mark placeholder for positional parameters
+	questionMarkRegex = regexp.MustCompile(`\?`)
 )
 
 // Executor executes SQL queries against DuckDB with Snowflake SQL translation.
@@ -29,6 +31,7 @@ type Executor struct {
 	mgr            *connection.Manager
 	repo           *metadata.Repository
 	translator     *Translator
+	classifier     *Classifier
 	copyProcessor  *CopyProcessor
 	mergeProcessor *MergeProcessor
 }
@@ -56,6 +59,7 @@ func NewExecutor(mgr *connection.Manager, repo *metadata.Repository, opts ...Exe
 		mgr:        mgr,
 		repo:       repo,
 		translator: NewTranslator(),
+		classifier: NewClassifier(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -145,35 +149,34 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 	return e.Query(ctx, boundSQL)
 }
 
-// applyBindings replaces :N placeholders with actual values from bindings.
-// Snowflake uses :1, :2, etc. for positional parameters.
+// applyBindings replaces :N or :name placeholders with actual values from bindings.
+// Snowflake uses :1, :2, etc. for positional parameters and :p0, :p1, etc. for named parameters.
+// Keys are sorted by length descending so that longer keys are replaced first,
+// preventing partial matches (e.g., :p10 is replaced before :p1).
 func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
-	// Get binding keys sorted in descending order to avoid :1 replacing :10, :11, etc.
-	keys := make([]int, 0, len(bindings))
+	// Sort keys by length descending to prevent partial matches
+	keys := make([]string, 0, len(bindings))
 	for k := range bindings {
-		pos, err := strconv.Atoi(k)
-		if err != nil {
-			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
-		}
-		keys = append(keys, pos)
+		keys = append(keys, k)
 	}
-	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] > keys[j]
+	})
 
 	result := sql
-	for _, pos := range keys {
-		key := strconv.Itoa(pos)
+	for _, key := range keys {
 		binding := bindings[key]
 		if binding == nil {
 			continue
 		}
-
-		placeholder := ":" + key
 		value, err := formatBindingValue(binding)
 		if err != nil {
 			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
 		}
-
-		result = strings.ReplaceAll(result, placeholder, value)
+		result = replaceBindingPlaceholder(result, key, value)
 	}
 
 	// Also handle ? placeholders (positional, 1-based)
@@ -182,11 +185,40 @@ func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingVa
 	return result, nil
 }
 
+// replaceBindingPlaceholder replaces all occurrences of :key in sql with value,
+// only when :key is not followed by a word character (letter, digit, or underscore).
+func replaceBindingPlaceholder(sql, key, value string) string {
+	placeholder := ":" + key
+	placeholderLen := len(placeholder)
+	var b strings.Builder
+	b.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		if i+placeholderLen <= len(sql) && sql[i:i+placeholderLen] == placeholder {
+			// Check that the next character (if any) is not a word character
+			end := i + placeholderLen
+			if end >= len(sql) || !isBindingWordChar(sql[end]) {
+				b.WriteString(value)
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(sql[i])
+		i++
+	}
+	return b.String()
+}
+
+// isBindingWordChar returns true if b is a letter, digit, or underscore.
+func isBindingWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
 func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*QueryBindingValue) string {
 	// Find all ? placeholders
-	re := regexp.MustCompile(`\?`)
-	matches := re.FindAllStringIndex(sql, -1)
+	matches := questionMarkRegex.FindAllStringIndex(sql, -1)
 	if len(matches) == 0 {
 		return sql
 	}
@@ -217,32 +249,34 @@ func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[stri
 //
 //nolint:gocyclo // switch statement for type handling inherently has many branches
 func formatBindingValue(b *QueryBindingValue) (string, error) {
-	if b == nil {
+	if b == nil || b.Value == nil {
 		return ValueNull, nil
 	}
+
+	value := *b.Value
 
 	switch strings.ToUpper(b.Type) {
 	case TypeText, "VARCHAR", "STRING":
 		// Escape single quotes and wrap in quotes
-		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		escaped := strings.ReplaceAll(value, "'", "''")
 		return "'" + escaped + "'", nil
 
 	case "FIXED", "INTEGER", "BIGINT", "SMALLINT", "TINYINT":
 		// Validate it's a number
-		if _, err := strconv.ParseInt(b.Value, 10, 64); err != nil {
-			return "", fmt.Errorf("invalid integer value: %s", b.Value)
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return "", fmt.Errorf("invalid integer value: %s", value)
 		}
-		return b.Value, nil
+		return value, nil
 
 	case "REAL", "FLOAT", "DOUBLE", "NUMBER", "DECIMAL":
 		// Validate it's a number
-		if _, err := strconv.ParseFloat(b.Value, 64); err != nil {
-			return "", fmt.Errorf("invalid float value: %s", b.Value)
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
+			return "", fmt.Errorf("invalid float value: %s", value)
 		}
-		return b.Value, nil
+		return value, nil
 
 	case "BOOLEAN":
-		lower := strings.ToLower(b.Value)
+		lower := strings.ToLower(value)
 		if lower == "true" || lower == "1" {
 			return "TRUE", nil
 		}
@@ -250,31 +284,39 @@ func formatBindingValue(b *QueryBindingValue) (string, error) {
 
 	case "DATE":
 		// Validate date format to prevent SQL injection
-		if !dateRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid DATE format: %s (expected YYYY-MM-DD)", b.Value)
+		if !dateRegex.MatchString(value) {
+			return "", fmt.Errorf("invalid DATE format: %s (expected YYYY-MM-DD)", value)
 		}
-		return "DATE '" + b.Value + "'", nil
+		return "DATE '" + value + "'", nil
 
 	case "TIME":
 		// Validate time format to prevent SQL injection
-		if !timeRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid TIME format: %s (expected HH:MM:SS)", b.Value)
+		if !timeRegex.MatchString(value) {
+			return "", fmt.Errorf("invalid TIME format: %s (expected HH:MM:SS)", value)
 		}
-		return "TIME '" + b.Value + "'", nil
+		return "TIME '" + value + "'", nil
 
 	case "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ":
-		// Validate timestamp format to prevent SQL injection
-		if !timestampRegex.MatchString(b.Value) {
-			return "", fmt.Errorf("invalid TIMESTAMP format: %s (expected YYYY-MM-DD HH:MM:SS)", b.Value)
+		// The Snowflake drivers may send timestamps as either:
+		// - Formatted strings: "2024-01-01 00:00:00"
+		// - Nanoseconds since epoch: "1704067200000000000"
+		if timestampRegex.MatchString(value) {
+			return "TIMESTAMP '" + value + "'", nil
 		}
-		return "TIMESTAMP '" + b.Value + "'", nil
+		// Try parsing as nanoseconds since epoch
+		nanos, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("invalid TIMESTAMP format: %s (expected YYYY-MM-DD HH:MM:SS or epoch nanoseconds)", value)
+		}
+		t := time.Unix(0, nanos).UTC()
+		return "TIMESTAMP '" + t.Format("2006-01-02 15:04:05.999999999") + "'", nil
 
 	case ValueNull:
 		return ValueNull, nil
 
 	default:
 		// Default to text treatment
-		escaped := strings.ReplaceAll(b.Value, "'", "''")
+		escaped := strings.ReplaceAll(value, "'", "''")
 		return "'" + escaped + "'", nil
 	}
 }
@@ -297,16 +339,13 @@ func (e *Executor) ExecuteWithBindings(ctx context.Context, sql string, bindings
 
 // Execute executes a non-query SQL statement (INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
 func (e *Executor) Execute(ctx context.Context, sql string) (*ExecResult, error) {
-	// Use classifier to detect DDL statements that need metadata tracking
-	classifier := NewClassifier()
-
 	// For CREATE TABLE, we need to register it in metadata
-	if classifier.IsCreateTable(sql) {
+	if e.classifier.IsCreateTable(sql) {
 		return e.executeCreateTable(ctx, sql)
 	}
 
 	// For DROP TABLE, we need to remove it from metadata
-	if classifier.IsDropTable(sql) {
+	if e.classifier.IsDropTable(sql) {
 		return e.executeDropTable(ctx, sql)
 	}
 
@@ -513,7 +552,7 @@ func convertValue(val interface{}) interface{} {
 }
 
 // ExecuteWithHistory wraps Execute with query history tracking.
-func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string) (*ExecResult, error) {
+func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*ExecResult, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -522,8 +561,8 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 		log.Printf("Failed to record query start: %v", err)
 	}
 
-	// Execute the query
-	result, execErr := e.Execute(ctx, sql)
+	// Execute with bindings
+	result, execErr := e.ExecuteWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()
@@ -541,7 +580,7 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 }
 
 // QueryWithHistory wraps Query with query history tracking.
-func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string) (*Result, error) {
+func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*Result, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -550,8 +589,8 @@ func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql
 		log.Printf("Failed to record query start: %v", err)
 	}
 
-	// Execute the query
-	result, execErr := e.Query(ctx, sql)
+	// Execute query with bindings
+	result, execErr := e.QueryWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()

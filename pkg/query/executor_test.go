@@ -11,6 +11,9 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 )
 
+// strPtr returns a pointer to a string literal.
+func strPtr(s string) *string { return &s }
+
 // setupTestExecutor creates a test executor with in-memory DuckDB.
 func setupTestExecutor(t *testing.T) (*Executor, *metadata.Repository) {
 	t.Helper()
@@ -338,7 +341,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "IntegerBinding",
 			sql:  "SELECT :1 AS num",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "FIXED", Value: "42"},
+				"1": {Type: "FIXED", Value: strPtr("42")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -351,7 +354,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "TextBinding",
 			sql:  "SELECT :1 AS name",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "TEXT", Value: "Hello World"},
+				"1": {Type: "TEXT", Value: strPtr("Hello World")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -364,9 +367,9 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "MultipleBindings",
 			sql:  "SELECT :1 AS a, :2 AS b, :3 AS c",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "FIXED", Value: "1"},
-				"2": {Type: "TEXT", Value: "test"},
-				"3": {Type: "REAL", Value: "3.14"},
+				"1": {Type: "FIXED", Value: strPtr("1")},
+				"2": {Type: "TEXT", Value: strPtr("test")},
+				"3": {Type: "REAL", Value: strPtr("3.14")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -379,7 +382,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "BooleanBindingTrue",
 			sql:  "SELECT :1 AS flag",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "BOOLEAN", Value: "true"},
+				"1": {Type: "BOOLEAN", Value: strPtr("true")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -392,7 +395,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "BooleanBindingFalse",
 			sql:  "SELECT :1 AS flag",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "BOOLEAN", Value: "false"},
+				"1": {Type: "BOOLEAN", Value: strPtr("false")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -405,7 +408,7 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			name: "TextWithSpecialChars",
 			sql:  "SELECT :1 AS text",
 			bindings: map[string]*QueryBindingValue{
-				"1": {Type: "TEXT", Value: "hello-world_123"},
+				"1": {Type: "TEXT", Value: strPtr("hello-world_123")},
 			},
 			expectedRows: 1,
 			checkValue: func(t *testing.T, rows [][]interface{}) {
@@ -425,6 +428,34 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			sql:          "SELECT 1 AS num",
 			bindings:     map[string]*QueryBindingValue{},
 			expectedRows: 1,
+		},
+		{
+			name: "NamedBindings",
+			sql:  "SELECT :p0 AS a, :p1 AS b, :p10 AS c, :foo AS d, :foo_bar AS e",
+			bindings: map[string]*QueryBindingValue{
+				"p0":      {Type: "FIXED", Value: strPtr("1")},
+				"p1":      {Type: "TEXT", Value: strPtr("hello")},
+				"p10":     {Type: "FIXED", Value: strPtr("99")},
+				"foo":     {Type: "TEXT", Value: strPtr("foo")},
+				"foo_bar": {Type: "TEXT", Value: strPtr("bar")},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if len(rows[0]) != 5 {
+					t.Errorf("Expected 5 columns, got %d", len(rows[0]))
+				}
+				// Verify :p1 didn't corrupt :p10
+				if rows[0][2] != int64(99) && rows[0][2] != int32(99) {
+					t.Errorf("Expected 99 for :p10, got %v", rows[0][2])
+				}
+				// Verify :foo didn't corrupt :foo_bar
+				if rows[0][3] != "foo" {
+					t.Errorf("Expected 'foo' for :foo, got %v", rows[0][3])
+				}
+				if rows[0][4] != "bar" {
+					t.Errorf("Expected 'bar' for :foo_bar, got %v", rows[0][4])
+				}
+			},
 		},
 	}
 
@@ -461,58 +492,68 @@ func TestFormatBindingValue(t *testing.T) {
 		},
 		{
 			name:     "TextValue",
-			binding:  &QueryBindingValue{Type: "TEXT", Value: "hello"},
+			binding:  &QueryBindingValue{Type: "TEXT", Value: strPtr("hello")},
 			expected: "'hello'",
 		},
 		{
 			name:     "TextWithQuotes",
-			binding:  &QueryBindingValue{Type: "TEXT", Value: "it's"},
+			binding:  &QueryBindingValue{Type: "TEXT", Value: strPtr("it's")},
 			expected: "'it''s'",
 		},
 		{
 			name:     "IntegerValue",
-			binding:  &QueryBindingValue{Type: "FIXED", Value: "123"},
+			binding:  &QueryBindingValue{Type: "FIXED", Value: strPtr("123")},
 			expected: "123",
 		},
 		{
 			name:     "RealValue",
-			binding:  &QueryBindingValue{Type: "REAL", Value: "3.14"},
+			binding:  &QueryBindingValue{Type: "REAL", Value: strPtr("3.14")},
 			expected: "3.14",
 		},
 		{
 			name:     "BooleanTrue",
-			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: "true"},
+			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: strPtr("true")},
 			expected: "TRUE",
 		},
 		{
 			name:     "BooleanFalse",
-			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: "false"},
+			binding:  &QueryBindingValue{Type: "BOOLEAN", Value: strPtr("false")},
 			expected: "FALSE",
 		},
 		{
 			name:     "DateValue",
-			binding:  &QueryBindingValue{Type: "DATE", Value: "2024-01-15"},
+			binding:  &QueryBindingValue{Type: "DATE", Value: strPtr("2024-01-15")},
 			expected: "DATE '2024-01-15'",
 		},
 		{
 			name:     "TimestampValue",
-			binding:  &QueryBindingValue{Type: "TIMESTAMP", Value: "2024-01-15 10:30:00"},
+			binding:  &QueryBindingValue{Type: "TIMESTAMP", Value: strPtr("2024-01-15 10:30:00")},
 			expected: "TIMESTAMP '2024-01-15 10:30:00'",
 		},
 		{
 			name:     "NullType",
-			binding:  &QueryBindingValue{Type: "NULL", Value: ""},
+			binding:  &QueryBindingValue{Type: "NULL", Value: strPtr("")},
 			expected: "NULL",
 		},
 		{
 			name:    "InvalidInteger",
-			binding: &QueryBindingValue{Type: "FIXED", Value: "not a number"},
+			binding: &QueryBindingValue{Type: "FIXED", Value: strPtr("not a number")},
 			wantErr: true,
 		},
 		{
 			name:    "InvalidReal",
-			binding: &QueryBindingValue{Type: "REAL", Value: "not a float"},
+			binding: &QueryBindingValue{Type: "REAL", Value: strPtr("not a float")},
 			wantErr: true,
+		},
+		{
+			name:     "NilValue",
+			binding:  &QueryBindingValue{Type: "TEXT", Value: nil},
+			expected: "NULL",
+		},
+		{
+			name:     "TimestampEpochNanos",
+			binding:  &QueryBindingValue{Type: "TIMESTAMP_NTZ", Value: strPtr("1704067200000000000")},
+			expected: "TIMESTAMP '2024-01-01 00:00:00'",
 		},
 	}
 
@@ -689,4 +730,62 @@ func TestTransactionClassifier(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExecutor_WithHistoryAndBindings tests that WithHistory methods correctly apply bindings.
+func TestExecutor_WithHistoryAndBindings(t *testing.T) {
+	executor, _ := setupTestExecutor(t)
+	ctx := context.Background()
+
+	t.Run("QueryWithHistory_Bindings", func(t *testing.T) {
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-001", "SELECT :name AS greeting", map[string]*QueryBindingValue{
+			"name": {Type: "TEXT", Value: strPtr("hello")},
+		})
+		if err != nil {
+			t.Fatalf("QueryWithHistory() error = %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+		if result.Rows[0][0] != "hello" {
+			t.Errorf("Expected 'hello', got %v", result.Rows[0][0])
+		}
+	})
+
+	t.Run("QueryWithHistory_NilBindings", func(t *testing.T) {
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-002", "SELECT 42 AS num", nil)
+		if err != nil {
+			t.Fatalf("QueryWithHistory() error = %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+	})
+
+	t.Run("ExecuteWithHistory_Bindings", func(t *testing.T) {
+		// Create a table, insert with bindings, then verify
+		_, err := executor.ExecuteWithHistory(ctx, "test-session", "query-003", "CREATE TABLE history_bind_test (id INTEGER, name VARCHAR)", nil)
+		if err != nil {
+			t.Fatalf("CREATE TABLE failed: %v", err)
+		}
+
+		_, err = executor.ExecuteWithHistory(ctx, "test-session", "query-004", "INSERT INTO history_bind_test SELECT :id, :name", map[string]*QueryBindingValue{
+			"id":   {Type: "FIXED", Value: strPtr("1")},
+			"name": {Type: "TEXT", Value: strPtr("Alice")},
+		})
+		if err != nil {
+			t.Fatalf("INSERT with bindings failed: %v", err)
+		}
+
+		result, err := executor.QueryWithHistory(ctx, "test-session", "query-005", "SELECT name FROM history_bind_test WHERE id = 1", nil)
+		if err != nil {
+			t.Fatalf("SELECT failed: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			t.Fatalf("Expected 1 row, got %d", len(result.Rows))
+		}
+		if result.Rows[0][0] != "Alice" {
+			t.Errorf("Expected 'Alice', got %v", result.Rows[0][0])
+		}
+	})
 }

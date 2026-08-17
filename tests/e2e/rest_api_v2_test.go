@@ -21,6 +21,9 @@ import (
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
 
+// strPtr returns a pointer to a string literal.
+func strPtr(s string) *string { return &s }
+
 // setupRESTAPIV2Server creates an in-process server for REST API v2 testing.
 func setupRESTAPIV2Server(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -886,7 +889,7 @@ func TestRESTAPIV2_BindingValidation(t *testing.T) {
 		reqBody := types.SubmitStatementRequest{
 			Statement: "SELECT :1 AS dt",
 			Bindings: map[string]*types.BindingValue{
-				"1": {Type: "DATE", Value: "2024-01-15"},
+				"1": {Type: "DATE", Value: strPtr("2024-01-15")},
 			},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -916,7 +919,7 @@ func TestRESTAPIV2_BindingValidation(t *testing.T) {
 		reqBody := types.SubmitStatementRequest{
 			Statement: "SELECT :1 AS dt",
 			Bindings: map[string]*types.BindingValue{
-				"1": {Type: "DATE", Value: "invalid-date"},
+				"1": {Type: "DATE", Value: strPtr("invalid-date")},
 			},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -943,7 +946,7 @@ func TestRESTAPIV2_BindingValidation(t *testing.T) {
 		reqBody := types.SubmitStatementRequest{
 			Statement: "SELECT :1 AS tm",
 			Bindings: map[string]*types.BindingValue{
-				"1": {Type: "TIME", Value: "14:30:00"},
+				"1": {Type: "TIME", Value: strPtr("14:30:00")},
 			},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -973,7 +976,7 @@ func TestRESTAPIV2_BindingValidation(t *testing.T) {
 		reqBody := types.SubmitStatementRequest{
 			Statement: "SELECT :1 AS ts",
 			Bindings: map[string]*types.BindingValue{
-				"1": {Type: "TIMESTAMP", Value: "2024-01-15T14:30:00Z"},
+				"1": {Type: "TIMESTAMP", Value: strPtr("2024-01-15T14:30:00Z")},
 			},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -1003,7 +1006,7 @@ func TestRESTAPIV2_BindingValidation(t *testing.T) {
 		reqBody := types.SubmitStatementRequest{
 			Statement: "SELECT :1 AS dt",
 			Bindings: map[string]*types.BindingValue{
-				"1": {Type: "DATE", Value: "2024-01-15'; DROP TABLE users; --"},
+				"1": {Type: "DATE", Value: strPtr("2024-01-15'; DROP TABLE users; --")},
 			},
 		}
 		body, _ := json.Marshal(reqBody)

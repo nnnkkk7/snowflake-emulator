@@ -13,12 +13,12 @@ func TestTypeMapper_MapDuckDBType(t *testing.T) {
 		duckType     string
 		expectedType string
 	}{
-		{"BIGINT", "NUMBER"},
-		{"INTEGER", "NUMBER"},
-		{"INT", "NUMBER"},
-		{"SMALLINT", "NUMBER"},
-		{"DOUBLE", "FLOAT"},
-		{"FLOAT", "FLOAT"},
+		{"BIGINT", "FIXED"},
+		{"INTEGER", "FIXED"},
+		{"INT", "FIXED"},
+		{"SMALLINT", "FIXED"},
+		{"DOUBLE", "REAL"},
+		{"FLOAT", "REAL"},
 		{"VARCHAR", "TEXT"},
 		{"TEXT", "TEXT"},
 		{"STRING", "TEXT"},
@@ -28,7 +28,7 @@ func TestTypeMapper_MapDuckDBType(t *testing.T) {
 		{"TIME", "TIME"},
 		{"BOOLEAN", "BOOLEAN"},
 		{"BOOL", "BOOLEAN"},
-		{"DECIMAL", "NUMBER"},
+		{"DECIMAL", "FIXED"},
 		{"BLOB", "BINARY"},
 		{"JSON", "VARIANT"},
 		{"LIST", "ARRAY"},

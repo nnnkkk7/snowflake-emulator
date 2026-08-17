@@ -89,14 +89,15 @@ func main() {
 	// Step 3: Execute SQL statements
 	fmt.Println("\n3. Executing SQL statements...")
 
-	// Create table
+	// Create table using Snowflake-native types
+	// The emulator translates these to DuckDB equivalents automatically
 	fmt.Println("\n   Creating table 'docker_test'...")
 	resp, err := executeStatement(`
 		CREATE TABLE IF NOT EXISTS docker_test (
-			id INTEGER,
-			name VARCHAR,
+			id NUMBER,
+			name TEXT,
 			value DECIMAL(10,2),
-			created_at DATE
+			created_at TIMESTAMP_NTZ
 		)
 	`, "DOCKER_TEST_DB", "PUBLIC")
 	if err != nil {

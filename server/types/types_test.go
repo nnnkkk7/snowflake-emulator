@@ -71,7 +71,7 @@ func TestQueryRequestJSON(t *testing.T) {
 	input := `{
 		"sqlText": "SELECT * FROM test_table",
 		"bindings": {
-			"param1": "value1"
+			"param1": {"type": "TEXT", "value": "value1"}
 		}
 	}`
 
@@ -83,8 +83,8 @@ func TestQueryRequestJSON(t *testing.T) {
 	if req.SQLText != "SELECT * FROM test_table" {
 		t.Errorf("Expected SQLText='SELECT * FROM test_table', got %s", req.SQLText)
 	}
-	if req.Bindings["param1"] != "value1" {
-		t.Errorf("Expected bindings[param1]=value1, got %v", req.Bindings["param1"])
+	if req.Bindings["param1"] == nil || req.Bindings["param1"].Value == nil || *req.Bindings["param1"].Value != "value1" {
+		t.Errorf("Expected bindings[param1].Value=value1, got %v", req.Bindings["param1"])
 	}
 }
 
@@ -96,7 +96,7 @@ func TestQueryResponseJSON(t *testing.T) {
 			SQLState:        "00000",
 			StatementTypeID: 1,
 			RowType: []ColumnMetadata{
-				{Name: "ID", Type: "NUMBER", Nullable: false},
+				{Name: "ID", Type: "FIXED", Nullable: false},
 				{Name: "NAME", Type: "TEXT", Nullable: true},
 			},
 			RowSet: [][]string{

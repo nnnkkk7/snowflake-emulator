@@ -10,13 +10,19 @@ const (
 // StatementTypeID represents Snowflake statement type identifiers.
 type StatementTypeID int64
 
-// Statement type IDs for gosnowflake protocol.
+// Statement type IDs matching Snowflake's wire protocol values.
 const (
-	StatementTypeSelect StatementTypeID = 1
-	StatementTypeInsert StatementTypeID = 2
-	StatementTypeDML    StatementTypeID = 3
-	StatementTypeDDL    StatementTypeID = 4
-	StatementTypeDrop   StatementTypeID = 5
+	StatementTypeSelect StatementTypeID = 0x1000 // 4096
+	StatementTypeDML    StatementTypeID = 0x3000 // 12288 - generic DML
+	StatementTypeInsert StatementTypeID = 0x3100 // 12544
+	StatementTypeUpdate StatementTypeID = 0x3200 // 12800
+	StatementTypeDelete StatementTypeID = 0x3300 // 13056
+	StatementTypeMerge  StatementTypeID = 0x3400 // 13312
+	StatementTypeCopy   StatementTypeID = 0x3600 // 13824
+	StatementTypeCommit StatementTypeID = 0x5100 // 20736
+	StatementTypeBegin  StatementTypeID = 0x5400 // 21504
+	StatementTypeDDL    StatementTypeID = 0x6000 // 24576
+	StatementTypeDrop   StatementTypeID = 0x6000 // 24576 - same as DDL
 )
 
 // QueryResultFormat defines the format of query results.

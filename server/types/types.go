@@ -93,9 +93,9 @@ type HeartbeatResponse struct {
 
 // QueryRequest is a SQL query execution request.
 type QueryRequest struct {
-	SQLText    string                 `json:"sqlText"`
-	Bindings   map[string]interface{} `json:"bindings,omitempty"`
-	Parameters map[string]string      `json:"parameters,omitempty"`
+	SQLText    string                   `json:"sqlText"`
+	Bindings   map[string]*BindingValue `json:"bindings,omitempty"`
+	Parameters map[string]string        `json:"parameters,omitempty"`
 }
 
 // QueryResponse is the response to a query request.
@@ -111,8 +111,8 @@ type QuerySuccessData struct {
 	QueryID           string           `json:"queryId"`
 	SQLState          string           `json:"sqlState,omitempty"`
 	StatementTypeID   int64            `json:"statementTypeId"`
-	RowType           []ColumnMetadata `json:"rowtype,omitempty"`
-	RowSet            [][]string       `json:"rowset,omitempty"`
+	RowType           []ColumnMetadata `json:"rowtype"`
+	RowSet            [][]string       `json:"rowset"`
 	Total             int64            `json:"total"`
 	Returned          int64            `json:"returned"`
 	QueryResultFormat string           `json:"queryResultFormat"`
