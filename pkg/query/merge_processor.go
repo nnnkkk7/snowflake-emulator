@@ -38,12 +38,15 @@ type WhenClause struct {
 
 // MergeStatement represents a parsed MERGE INTO statement.
 type MergeStatement struct {
-	TargetTable string       // Target table name (may include db.schema.table)
-	TargetAlias string       // Alias for target table
-	SourceTable string       // Source table name or subquery
-	SourceAlias string       // Alias for source table
-	OnCondition string       // JOIN condition
-	WhenClauses []WhenClause // List of WHEN clauses
+	OriginalSQL    string
+	TargetDatabase string       // Target Database
+	TargetSchema   string       // Target Schema
+	TargetTable    string       // Target table name (may include db.schema.table)
+	TargetAlias    string       // Alias for target table
+	SourceTable    string       // Source table name or subquery
+	SourceAlias    string       // Alias for source table
+	OnCondition    string       // JOIN condition
+	WhenClauses    []WhenClause // List of WHEN clauses
 }
 
 // mergePatterns holds pre-compiled regex patterns for MERGE statement parsing.
@@ -68,7 +71,7 @@ func newMergePatterns() *mergePatterns {
 		// MERGE INTO target [AS alias] - alias must not be USING
 		mergeInto: regexp.MustCompile(`(?i)MERGE\s+INTO\s+(\S+)(?:\s+AS\s+(\w+)|\s+([a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+USING)`),
 		// USING source [AS alias] or USING (subquery) [AS alias] - alias must not be ON
-		using: regexp.MustCompile(`(?i)USING\s+(\([^)]+\)|[^\s(]+)(?:\s+AS\s+(\w+)|\s+([a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+ON)`),
+		using: regexp.MustCompile(`(?is)USING\s+(.+?)\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s+ON\s+`),
 		// ON condition - we'll extract until WHEN in the parsing logic
 		onCondition: regexp.MustCompile(`(?i)\bON\s+(.+)`),
 		// WHEN MATCHED [AND condition] THEN
@@ -110,14 +113,20 @@ func NewMergeProcessor(executor *Executor) *MergeProcessor {
 func (h *MergeProcessor) ParseMergeStatement(sql string) (*MergeStatement, error) {
 	sql = strings.TrimSpace(sql)
 
-	stmt := &MergeStatement{}
+	stmt := &MergeStatement{
+		OriginalSQL: sql,
+	}
 
 	// Parse MERGE INTO target [AS alias]
 	mergeMatch := h.patterns.mergeInto.FindStringSubmatch(sql)
 	if len(mergeMatch) < 2 {
 		return nil, fmt.Errorf("invalid MERGE INTO syntax: missing target table")
 	}
-	stmt.TargetTable = mergeMatch[1]
+	targetDatabase, targetSchema, targetTable := splitQualifiedObjectName(mergeMatch[1])
+
+	stmt.TargetDatabase = targetDatabase
+	stmt.TargetSchema = targetSchema
+	stmt.TargetTable = targetTable
 	// Check for alias (either with AS or without)
 	if len(mergeMatch) > 2 && mergeMatch[2] != "" {
 		stmt.TargetAlias = mergeMatch[2]
@@ -130,12 +139,10 @@ func (h *MergeProcessor) ParseMergeStatement(sql string) (*MergeStatement, error
 	if len(usingMatch) < 2 {
 		return nil, fmt.Errorf("invalid MERGE syntax: missing USING clause")
 	}
-	stmt.SourceTable = usingMatch[1]
-	// Check for alias (either with AS or without)
+	stmt.SourceTable = strings.TrimSpace(usingMatch[1])
+
 	if len(usingMatch) > 2 && usingMatch[2] != "" {
-		stmt.SourceAlias = usingMatch[2]
-	} else if len(usingMatch) > 3 && usingMatch[3] != "" {
-		stmt.SourceAlias = usingMatch[3]
+		stmt.SourceAlias = strings.TrimSpace(usingMatch[2])
 	}
 
 	// Parse ON condition - extract until first WHEN keyword
@@ -350,19 +357,21 @@ func splitByCommaRespectingParens(s string) []string {
 func (h *MergeProcessor) ExecuteMerge(ctx context.Context, stmt *MergeStatement) (*MergeResult, error) {
 	result := &MergeResult{}
 
-	// Build the native MERGE SQL
-	mergeSQL := h.buildMergeSQL(stmt)
+	mergeSQL := strings.TrimSpace(stmt.OriginalSQL)
+	if mergeSQL == "" {
+		mergeSQL = h.buildMergeSQL(stmt)
+	}
 
-	// Try native execution first (DuckDB 1.4+ supports MERGE)
 	execResult, err := h.executor.executeRaw(ctx, mergeSQL)
 	if err == nil {
-		// Native MERGE succeeded
-		// DuckDB returns total rows affected; we can't distinguish insert/update/delete
 		result.RowsUpdated = execResult.RowsAffected
 		return result, nil
 	}
 
-	// If native MERGE fails (older DuckDB version), decompose into separate statements
+	if stmt.TargetSchema != "" {
+		stmt.SourceTable = qualifySourceTableRefs(stmt.SourceTable, stmt.TargetSchema)
+	}
+
 	return h.executeDecomposedMerge(ctx, stmt)
 }
 
@@ -491,52 +500,43 @@ func (h *MergeProcessor) executeDecomposedMerge(ctx context.Context, stmt *Merge
 
 // executeMatchedUpdate executes UPDATE for WHEN MATCHED THEN UPDATE.
 func (h *MergeProcessor) executeMatchedUpdate(ctx context.Context, stmt *MergeStatement, when *WhenClause) (int64, error) {
-	// Build: UPDATE target SET ... FROM source WHERE join_condition [AND when_condition]
-	// DuckDB requires the table name (not alias) in UPDATE clause
 	var sb strings.Builder
 
+	targetTableName := h.targetTableName(stmt)
+
 	sb.WriteString("UPDATE ")
-	sb.WriteString(stmt.TargetTable)
+	sb.WriteString(targetTableName)
+
+	if stmt.TargetAlias != "" {
+		sb.WriteString(" AS ")
+		sb.WriteString(stmt.TargetAlias)
+	}
+
 	sb.WriteString(" SET ")
 
-	// Replace target alias with table name in SET clauses
 	var sets []string
 	for _, sc := range when.SetClauses {
-		col := sc.Column
-		val := sc.Value
-		// If column has alias prefix matching target alias, replace with table name
-		if stmt.TargetAlias != "" {
-			col = strings.Replace(col, stmt.TargetAlias+".", stmt.TargetTable+".", 1)
-		}
-		sets = append(sets, col+" = "+val)
+		col := unqualifyColumn(sc.Column)
+
+		sets = append(sets, col+" = "+sc.Value)
 	}
+
 	sb.WriteString(strings.Join(sets, ", "))
 
-	// FROM clause for the source
 	sb.WriteString(" FROM ")
 	sb.WriteString(stmt.SourceTable)
+
 	if stmt.SourceAlias != "" {
 		sb.WriteString(" AS ")
 		sb.WriteString(stmt.SourceAlias)
 	}
 
-	// WHERE clause with join condition
-	// Replace target alias with table name in condition
-	onCondition := stmt.OnCondition
-	if stmt.TargetAlias != "" {
-		onCondition = strings.ReplaceAll(onCondition, stmt.TargetAlias+".", stmt.TargetTable+".")
-	}
 	sb.WriteString(" WHERE ")
-	sb.WriteString(onCondition)
+	sb.WriteString(stmt.OnCondition)
 
-	// Additional AND condition
 	if when.Condition != "" {
-		condition := when.Condition
-		if stmt.TargetAlias != "" {
-			condition = strings.ReplaceAll(condition, stmt.TargetAlias+".", stmt.TargetTable+".")
-		}
 		sb.WriteString(" AND ")
-		sb.WriteString(condition)
+		sb.WriteString(when.Condition)
 	}
 
 	execResult, err := h.executor.executeRaw(ctx, sb.String())
@@ -552,8 +552,10 @@ func (h *MergeProcessor) executeMatchedDelete(ctx context.Context, stmt *MergeSt
 	// Build: DELETE FROM target USING source WHERE join_condition [AND when_condition]
 	var sb strings.Builder
 
+	targetTableName := h.targetTableName(stmt)
+
 	sb.WriteString("DELETE FROM ")
-	sb.WriteString(stmt.TargetTable)
+	sb.WriteString(targetTableName)
 
 	// USING clause for the source (DuckDB syntax)
 	sb.WriteString(" USING ")
@@ -586,8 +588,10 @@ func (h *MergeProcessor) executeNotMatchedInsert(ctx context.Context, stmt *Merg
 	// Build: INSERT INTO target (cols) SELECT vals FROM source WHERE NOT EXISTS (...)
 	var sb strings.Builder
 
+	targetTableName := h.targetTableName(stmt)
+
 	sb.WriteString("INSERT INTO ")
-	sb.WriteString(stmt.TargetTable)
+	sb.WriteString(targetTableName)
 
 	if len(when.InsertCols) > 0 {
 		sb.WriteString(" (")
@@ -607,7 +611,7 @@ func (h *MergeProcessor) executeNotMatchedInsert(ctx context.Context, stmt *Merg
 
 	// WHERE NOT EXISTS to find non-matching rows
 	sb.WriteString(" WHERE NOT EXISTS (SELECT 1 FROM ")
-	sb.WriteString(stmt.TargetTable)
+	sb.WriteString(targetTableName)
 	if stmt.TargetAlias != "" {
 		sb.WriteString(" AS ")
 		sb.WriteString(stmt.TargetAlias)
@@ -628,4 +632,52 @@ func (h *MergeProcessor) executeNotMatchedInsert(ctx context.Context, stmt *Merg
 	}
 
 	return execResult.RowsAffected, nil
+}
+
+func unqualifyColumn(column string) string {
+	column = strings.TrimSpace(column)
+
+	if idx := strings.LastIndex(column, "."); idx >= 0 {
+		return strings.TrimSpace(column[idx+1:])
+	}
+
+	return column
+}
+
+func (h *MergeProcessor) targetTableName(stmt *MergeStatement) string {
+	return buildDuckDBQualifiedTableName(stmt.TargetSchema, stmt.TargetTable)
+}
+
+func qualifySourceTableRefs(sql string, schemaName string) string {
+	schemaName = strings.TrimSpace(schemaName)
+	schemaName = strings.Trim(schemaName, `"`)
+	if schemaName == "" {
+		return sql
+	}
+
+	re := regexp.MustCompile(`(?i)\bFROM\s+("[^"]+"|[A-Za-z_][A-Za-z0-9_]*)`)
+
+	return re.ReplaceAllStringFunc(sql, func(match string) string {
+		parts := strings.Fields(match)
+		if len(parts) < 2 {
+			return match
+		}
+
+		tableRef := parts[1]
+
+		// Already qualified.
+		if strings.Contains(tableRef, ".") {
+			return match
+		}
+
+		// Do not touch stages or subqueries.
+		if strings.HasPrefix(tableRef, "@") || strings.HasPrefix(tableRef, "(") {
+			return match
+		}
+
+		tableName := strings.Trim(tableRef, `"`)
+		qualified := buildDuckDBQualifiedTableName(schemaName, tableName)
+
+		return "FROM " + qualified
+	})
 }
