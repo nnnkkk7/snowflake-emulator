@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/duckdb/duckdb-go/v2"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/connection"
 	"github.com/nnnkkk7/snowflake-emulator/pkg/metadata"
 )
@@ -515,6 +516,10 @@ func convertValue(val interface{}) interface{} {
 		return v
 	case string:
 		return v
+	case duckdb.Decimal:
+		// DECIMAL (Snowflake NUMBER) values are returned as exact decimal strings,
+		// matching how Snowflake serializes NUMBER values
+		return v.String()
 	default:
 		// For other types, return as-is
 		return v

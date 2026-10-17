@@ -49,15 +49,16 @@ func main() {
 	}
 	fmt.Println("Connected to Snowflake Emulator!")
 
-	// Create a sample table
+	// Create a sample table using Snowflake-native types
+	// The emulator translates these to DuckDB equivalents automatically
 	fmt.Println("\n=== Creating table ===")
 	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER,
-			name VARCHAR,
-			email VARCHAR,
-			score INTEGER,
-			created_at DATE
+			id NUMBER,
+			name TEXT,
+			email STRING,
+			score NUMBER,
+			created_at TIMESTAMP_NTZ
 		)
 	`)
 	if err != nil {

@@ -29,6 +29,8 @@ func TestTypeMapper_MapDuckDBType(t *testing.T) {
 		{"BOOLEAN", "BOOLEAN"},
 		{"BOOL", "BOOLEAN"},
 		{"DECIMAL", "NUMBER"},
+		{"DECIMAL(38,0)", "NUMBER"},
+		{"DECIMAL(10,2)", "NUMBER"},
 		{"BLOB", "BINARY"},
 		{"JSON", "VARIANT"},
 		{"LIST", "ARRAY"},

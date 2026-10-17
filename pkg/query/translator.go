@@ -102,6 +102,11 @@ func (t *Translator) Translate(sql string) (string, error) {
 	// Trim whitespace
 	sql = strings.TrimSpace(sql)
 
+	// Translate Snowflake data types (NUMBER, TEXT, TIMESTAMP_NTZ, VARIANT, ...) to DuckDB types.
+	// This runs before the DDL short-circuit and AST parsing so that every statement kind,
+	// including multi-statement batches, gets its types translated.
+	sql = translateTypes(sql)
+
 	// Skip AST transformation for DDL statements - they don't need function translation
 	// and the sqlparser adds unwanted backticks when serializing back to string
 	// Also skip SHOW/DESCRIBE/EXPLAIN which cause vitess-sqlparser to panic
@@ -155,6 +160,9 @@ func (t *Translator) Translate(sql string) (string, error) {
 // handleComplexTransformations handles transformations that require more than simple renames.
 // This handles marked functions and CURRENT_TIMESTAMP/CURRENT_DATE.
 func (t *Translator) handleComplexTransformations(sql string) string {
+	// vitess-sqlparser serializes CAST(x AS type) as convert(x, type), which DuckDB lacks
+	sql = rewriteConvertToCast(sql)
+
 	// Remove "from dual" added by vitess-sqlparser (Oracle-style, not needed in DuckDB)
 	sql = removeDualSuffix(sql)
 
