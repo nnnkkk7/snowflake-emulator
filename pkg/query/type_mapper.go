@@ -3,6 +3,7 @@ package query
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/nnnkkk7/snowflake-emulator/server/types"
 )
@@ -59,6 +60,10 @@ func NewTypeMapper() *TypeMapper {
 
 // MapDuckDBType converts a DuckDB type to its Snowflake equivalent.
 func (m *TypeMapper) MapDuckDBType(duckType string) string {
+	// Parameterized types such as DECIMAL(38,0) are looked up by their base name
+	if i := strings.IndexByte(duckType, '('); i >= 0 {
+		duckType = strings.TrimSpace(duckType[:i])
+	}
 	if sfType, ok := m.typeMapping[duckType]; ok {
 		return sfType
 	}
