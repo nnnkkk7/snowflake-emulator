@@ -72,6 +72,8 @@ release:
     name: snowflake-emulator
 
   draft: false
+  # Reuse the draft release created by tagpr (matched by name) instead of creating a second release
+  use_existing_draft: true
   prerelease: auto
   mode: replace
 
