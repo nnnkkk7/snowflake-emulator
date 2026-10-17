@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -437,5 +438,163 @@ func TestQueryHandler_QueryResultFormat(t *testing.T) {
 	// Verify query result format
 	if resp.Data.QueryResultFormat != "json" {
 		t.Errorf("Expected queryResultFormat 'json', got %s", resp.Data.QueryResultFormat)
+	}
+}
+
+// TestQueryHandler_ExecuteQueryWithBindings tests parameter bindings sent by drivers.
+func TestQueryHandler_ExecuteQueryWithBindings(t *testing.T) {
+	handler, sessionMgr, repo := setupTestQueryHandler(t)
+	ctx := context.Background()
+
+	sess, err := sessionMgr.CreateSession(ctx, "testuser", "TEST_DB", "PUBLIC")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		request       types.QueryRequest
+		checkResponse func(*testing.T, *types.QueryResponse)
+	}{
+		{
+			name: "QuestionMarkPlaceholder",
+			request: types.QueryRequest{
+				SQLText: "SELECT NAME FROM TEST_DB.PUBLIC_TEST_TABLE WHERE ID = ?",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "FIXED", "value": "1"},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if !resp.Success {
+					t.Fatalf("Expected success, got: %s", resp.Message)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "Alice" {
+					t.Errorf("Expected [[Alice]], got %v", resp.Data.RowSet)
+				}
+			},
+		},
+		{
+			name: "VPrefixedPlaceholder",
+			request: types.QueryRequest{
+				SQLText: "SELECT NAME FROM TEST_DB.PUBLIC_TEST_TABLE WHERE NAME = :v1",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "TEXT", "value": "Bob"},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if !resp.Success {
+					t.Fatalf("Expected success, got: %s", resp.Message)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "Bob" {
+					t.Errorf("Expected [[Bob]], got %v", resp.Data.RowSet)
+				}
+			},
+		},
+		{
+			name: "NullValue",
+			request: types.QueryRequest{
+				SQLText: "SELECT :1 IS NULL AS is_null",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "TEXT", "value": nil},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if !resp.Success {
+					t.Fatalf("Expected success, got: %s", resp.Message)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][0] != "true" {
+					t.Errorf("Expected [[true]], got %v", resp.Data.RowSet)
+				}
+			},
+		},
+		{
+			name: "InsertWithBindings",
+			request: types.QueryRequest{
+				SQLText: "INSERT INTO TEST_DB.PUBLIC_TEST_TABLE VALUES (:1, :2, :3)",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "FIXED", "value": "3"},
+					"2": map[string]interface{}{"type": "TEXT", "value": "Charlie"},
+					"3": map[string]interface{}{"type": "FIXED", "value": "300"},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if !resp.Success {
+					t.Fatalf("Expected success, got: %s", resp.Message)
+				}
+				if resp.Data.Total != 1 {
+					t.Errorf("Expected 1 row affected, got %d", resp.Data.Total)
+				}
+			},
+		},
+		{
+			name: "ArrayValueRejected",
+			request: types.QueryRequest{
+				SQLText: "SELECT ?",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "FIXED", "value": []interface{}{"4", "5"}},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if resp.Success || resp.Code != apierror.CodeInvalidParameter {
+					t.Errorf("Expected invalid parameter error, got success=%v code=%s", resp.Success, resp.Code)
+				}
+			},
+		},
+		{
+			name: "NonObjectBindingRejected",
+			request: types.QueryRequest{
+				SQLText: "SELECT ?",
+				Bindings: map[string]interface{}{
+					"1": "value",
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if resp.Success || resp.Code != apierror.CodeInvalidParameter {
+					t.Errorf("Expected invalid parameter error, got success=%v code=%s", resp.Success, resp.Code)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.request)
+			if err != nil {
+				t.Fatalf("Failed to marshal request: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/queries/v1/query-request", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Snowflake Token=\""+sess.Token+"\"")
+
+			rr := httptest.NewRecorder()
+			handler.ExecuteQuery(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("Expected status %d, got %d", http.StatusOK, rr.Code)
+			}
+
+			var resp types.QueryResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("Failed to unmarshal response: %v", err)
+			}
+
+			tt.checkResponse(t, &resp)
+		})
+	}
+
+	// Queries with bindings are recorded in query history
+	history, err := repo.GetQueryHistoryBySession(ctx, fmt.Sprintf("%d", sess.ID), 100)
+	if err != nil {
+		t.Fatalf("GetQueryHistoryBySession() error = %v", err)
+	}
+	found := false
+	for _, entry := range history {
+		if entry.SQLText == "SELECT NAME FROM TEST_DB.PUBLIC_TEST_TABLE WHERE ID = ?" && entry.Status == "SUCCESS" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected query with bindings in history, got %d entries", len(history))
 	}
 }

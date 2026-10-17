@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -427,6 +426,33 @@ func TestExecutor_QueryWithBindings(t *testing.T) {
 			bindings:     map[string]*QueryBindingValue{},
 			expectedRows: 1,
 		},
+		{
+			name: "VPrefixedPlaceholders",
+			sql:  "SELECT :v1 AS a, :v2 AS b",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "foo"},
+				"2": {Type: "FIXED", Value: "2"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != "foo" {
+					t.Errorf("Expected 'foo', got %v", rows[0][0])
+				}
+			},
+		},
+		{
+			name: "NullBinding",
+			sql:  "SELECT :1 AS v",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "NULL"},
+			},
+			expectedRows: 1,
+			checkValue: func(t *testing.T, rows [][]interface{}) {
+				if rows[0][0] != nil {
+					t.Errorf("Expected NULL, got %v", rows[0][0])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -692,68 +718,81 @@ func TestTransactionClassifier(t *testing.T) {
 	}
 }
 
-func TestExecutorApplyBindingsSupportsGosnowflakeVPlaceholders(t *testing.T) {
+// TestExecutor_ApplyBindings tests placeholder and binding key formats.
+func TestExecutor_ApplyBindings(t *testing.T) {
 	executor := &Executor{}
 
-	sqlText := `
-		SELECT COLUMN_NAME
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = :v1
-		  AND TABLE_NAME = :v2
-	`
-
-	bindings := map[string]*BindingValue{
-		"1": {
-			Type:  "TEXT",
-			Value: "MAIN",
+	tests := []struct {
+		name     string
+		sql      string
+		bindings map[string]*QueryBindingValue
+		expected string
+		wantErr  bool
+	}{
+		{
+			name: "NumericPlaceholders",
+			sql:  "SELECT * FROM t WHERE a = :1 AND b = :2",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "foo"},
+				"2": {Type: "FIXED", Value: "2"},
+			},
+			expected: "SELECT * FROM t WHERE a = 'foo' AND b = 2",
 		},
-		"2": {
-			Type:  "TEXT",
-			Value: "E2E_TEST",
+		{
+			name: "VPrefixedPlaceholders",
+			sql:  "SELECT * FROM t WHERE a = :v1 AND b = :V2",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "foo"},
+				"2": {Type: "TEXT", Value: "bar"},
+			},
+			expected: "SELECT * FROM t WHERE a = 'foo' AND b = 'bar'",
+		},
+		{
+			name: "VPrefixedKeys",
+			sql:  "SELECT * FROM t WHERE a = :v1 AND b = :v2",
+			bindings: map[string]*QueryBindingValue{
+				"v1": {Type: "TEXT", Value: "foo"},
+				"v2": {Type: "TEXT", Value: "bar"},
+			},
+			expected: "SELECT * FROM t WHERE a = 'foo' AND b = 'bar'",
+		},
+		{
+			name: "TenOrMoreBindings",
+			sql:  "SELECT :v1, :v10, :1, :10",
+			bindings: map[string]*QueryBindingValue{
+				"1":  {Type: "FIXED", Value: "1"},
+				"10": {Type: "FIXED", Value: "10"},
+			},
+			expected: "SELECT 1, 10, 1, 10",
+		},
+		{
+			name: "QuestionMarkPlaceholders",
+			sql:  "SELECT * FROM t WHERE a = ? AND b = ?",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "foo"},
+				"2": {Type: "FIXED", Value: "2"},
+			},
+			expected: "SELECT * FROM t WHERE a = 'foo' AND b = 2",
+		},
+		{
+			name: "NamedKeyNotSupported",
+			sql:  "SELECT :name",
+			bindings: map[string]*QueryBindingValue{
+				"name": {Type: "TEXT", Value: "foo"},
+			},
+			wantErr: true,
 		},
 	}
 
-	got, err := executor.applyBindings(sqlText, bindings)
-	if err != nil {
-		t.Fatalf("applyBindings failed: %v", err)
-	}
-
-	if strings.Contains(got, ":v1") || strings.Contains(got, ":v2") {
-		t.Fatalf("expected :v placeholders to be replaced, got: %s", got)
-	}
-
-	if !strings.Contains(got, "TABLE_SCHEMA = 'MAIN'") {
-		t.Fatalf("expected schema binding to be replaced, got: %s", got)
-	}
-
-	if !strings.Contains(got, "TABLE_NAME = 'E2E_TEST'") {
-		t.Fatalf("expected table binding to be replaced, got: %s", got)
-	}
-}
-
-func TestExecutorApplyBindingsSupportsVKeys(t *testing.T) {
-	executor := &Executor{}
-
-	sqlText := `SELECT * FROM T WHERE A = :v1 AND B = :v2`
-
-	bindings := map[string]*BindingValue{
-		"v1": {
-			Type:  "TEXT",
-			Value: "foo",
-		},
-		"v2": {
-			Type:  "TEXT",
-			Value: "bar",
-		},
-	}
-
-	got, err := executor.applyBindings(sqlText, bindings)
-	if err != nil {
-		t.Fatalf("applyBindings failed: %v", err)
-	}
-
-	expected := `SELECT * FROM T WHERE A = 'foo' AND B = 'bar'`
-	if got != expected {
-		t.Fatalf("unexpected SQL:\nexpected: %s\nactual:   %s", expected, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := executor.applyBindings(tt.sql, tt.bindings)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("applyBindings() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.expected {
+				t.Errorf("applyBindings() = %q, want %q", got, tt.expected)
+			}
+		})
 	}
 }

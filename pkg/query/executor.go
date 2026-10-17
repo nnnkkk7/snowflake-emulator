@@ -146,36 +146,23 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 }
 
 // applyBindings replaces :N placeholders with actual values from bindings.
-// Snowflake uses :1, :2 or :v1, :v2, etc. for positional parameters.
-func (e *Executor) applyBindings(
-	sql string,
-	bindings map[string]*QueryBindingValue,
-) (string, error) {
+// Snowflake uses :1, :2, etc. for positional parameters. Some drivers (e.g. the Node.js
+// snowflake-sdk) send :v1, :v2, etc. instead, and binding keys may use the same "v" prefix.
+func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
+	// Normalize keys ("v1" → "1") and sort them in descending order to avoid :1 replacing :10, :11, etc.
 	normalized := make(map[string]*QueryBindingValue, len(bindings))
-
-	for key, binding := range bindings {
-		normalizedKey := normalizeBindingKey(key)
-		if normalizedKey == "" {
-			return "", fmt.Errorf("invalid binding key %q", key)
-		}
-
-		normalized[normalizedKey] = binding
-	}
-
-	keys := make([]int, 0, len(normalized))
-	for key := range normalized {
-		pos, err := strconv.Atoi(key)
+	keys := make([]int, 0, len(bindings))
+	for k, binding := range bindings {
+		pos, err := strconv.Atoi(normalizeBindingKey(k))
 		if err != nil {
-			return "", fmt.Errorf("invalid binding key %q: must be numeric after normalization", key)
+			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
 		}
-
+		normalized[strconv.Itoa(pos)] = binding
 		keys = append(keys, pos)
 	}
-
 	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
 
 	result := sql
-
 	for _, pos := range keys {
 		key := strconv.Itoa(pos)
 		binding := normalized[key]
@@ -188,37 +175,20 @@ func (e *Executor) applyBindings(
 			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
 		}
 
-		placeholders := []string{
-			":" + key,
-			":v" + key,
-			":V" + key,
-		}
-
-		for _, placeholder := range placeholders {
+		for _, placeholder := range []string{":" + key, ":v" + key, ":V" + key} {
 			result = strings.ReplaceAll(result, placeholder, value)
 		}
 	}
 
+	// Also handle ? placeholders (positional, 1-based)
 	result = e.replaceQuestionMarkPlaceholders(result, normalized)
 
 	return result, nil
 }
 
+// normalizeBindingKey strips the optional "v" prefix from a binding key ("v1" → "1").
 func normalizeBindingKey(key string) string {
-	key = strings.TrimSpace(key)
-	key = strings.TrimPrefix(key, ":")
-	key = strings.TrimPrefix(key, "v")
-	key = strings.TrimPrefix(key, "V")
-
-	if key == "" {
-		return ""
-	}
-
-	if _, err := strconv.Atoi(key); err != nil {
-		return ""
-	}
-
-	return key
+	return strings.TrimPrefix(strings.TrimPrefix(key, "v"), "V")
 }
 
 // replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
@@ -553,6 +523,11 @@ func convertValue(val interface{}) interface{} {
 
 // ExecuteWithHistory wraps Execute with query history tracking.
 func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, sql string) (*ExecResult, error) {
+	return e.ExecuteWithBindingsAndHistory(ctx, sessionID, queryID, sql, nil)
+}
+
+// ExecuteWithBindingsAndHistory wraps ExecuteWithBindings with query history tracking.
+func (e *Executor) ExecuteWithBindingsAndHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*ExecResult, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -562,7 +537,7 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 	}
 
 	// Execute the query
-	result, execErr := e.Execute(ctx, sql)
+	result, execErr := e.ExecuteWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()
@@ -581,6 +556,11 @@ func (e *Executor) ExecuteWithHistory(ctx context.Context, sessionID, queryID, s
 
 // QueryWithHistory wraps Query with query history tracking.
 func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql string) (*Result, error) {
+	return e.QueryWithBindingsAndHistory(ctx, sessionID, queryID, sql, nil)
+}
+
+// QueryWithBindingsAndHistory wraps QueryWithBindings with query history tracking.
+func (e *Executor) QueryWithBindingsAndHistory(ctx context.Context, sessionID, queryID, sql string, bindings map[string]*QueryBindingValue) (*Result, error) {
 	startTime := time.Now()
 
 	// Record query start (non-blocking on failure)
@@ -590,7 +570,7 @@ func (e *Executor) QueryWithHistory(ctx context.Context, sessionID, queryID, sql
 	}
 
 	// Execute the query
-	result, execErr := e.Query(ctx, sql)
+	result, execErr := e.QueryWithBindings(ctx, sql, bindings)
 
 	// Calculate execution time
 	executionTimeMs := time.Since(startTime).Milliseconds()

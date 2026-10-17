@@ -910,3 +910,54 @@ func TestGosnowflake_AllSQLOperations(t *testing.T) {
 
 	t.Log("All SQL operations via gosnowflake driver: PASSED")
 }
+
+// TestGosnowflake_Bindings tests that parameter bindings sent by gosnowflake are applied.
+func TestGosnowflake_Bindings(t *testing.T) {
+	server := setupTestEmulator(t)
+	hostPort := server.URL[7:]
+
+	dsn := fmt.Sprintf("testuser:testpass@%s/TEST_DB/PUBLIC?account=testaccount&protocol=http&loginTimeout=5", hostPort)
+
+	db, err := sql.Open("snowflake", dsn)
+	if err != nil {
+		t.Fatalf("Failed to open connection: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE test_bindings (id INTEGER, name VARCHAR, score DOUBLE)`); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+
+	// INSERT with ? placeholders, including a NULL value
+	if _, err := db.ExecContext(ctx, `INSERT INTO test_bindings VALUES (?, ?, ?)`, 1, "Alice", 95.5); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("INSERT with bindings failed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO test_bindings VALUES (?, ?, ?)`, 2, nil, 80.0); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("INSERT with NULL binding failed: %v", err)
+	}
+
+	// SELECT with ? placeholder
+	var name string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM test_bindings WHERE id = ?`, 1).Scan(&name); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("SELECT with binding failed: %v", err)
+	}
+	if name != "Alice" {
+		t.Errorf("Expected 'Alice', got %q", name)
+	}
+
+	var nullCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM test_bindings WHERE name IS NULL AND score > ?`, 50).Scan(&nullCount); err != nil {
+		logCapturedRequests(t)
+		t.Fatalf("SELECT with NULL check failed: %v", err)
+	}
+	if nullCount != 1 {
+		t.Errorf("Expected 1 row with NULL name, got %d", nullCount)
+	}
+}
