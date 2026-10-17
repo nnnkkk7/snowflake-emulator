@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.11](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.10...v0.0.11) - 2026-10-17
+- ci: reuse tagpr draft release in GoReleaser by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/62
+
 ## [v0.0.10](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.9...v0.0.10) - 2026-10-17
 - fix(deps): update go dependencies (non-major) by @renovate[bot] in https://github.com/nnnkkk7/snowflake-emulator/pull/52
 - feat: translate Snowflake data types to DuckDB types by @roend83 in https://github.com/nnnkkk7/snowflake-emulator/pull/46
