@@ -66,7 +66,6 @@ func main() {
 	copyProcessor := query.NewCopyProcessor(stageMgr, repo, executor)
 	mergeProcessor := query.NewMergeProcessor(executor)
 	executor.Configure(
-		query.WithStageManager(stageMgr),
 		query.WithCopyProcessor(copyProcessor),
 		query.WithMergeProcessor(mergeProcessor),
 	)
