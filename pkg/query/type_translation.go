@@ -48,7 +48,9 @@ var snowflakeTypeRules = map[string]typeRule{
 	"OBJECT":  {to: "JSON"},
 	"ARRAY":   {to: "JSON"},
 
-	// DuckDB date/time types do not accept a fractional-seconds precision argument.
+	// Fractional-seconds precision is dropped. DuckDB TIMESTAMPTZ and TIME take no
+	// precision argument, so all timestamp types use microsecond precision for consistency
+	// (Snowflake's default is nanoseconds; digits beyond microseconds are truncated).
 	"TIMESTAMP_NTZ": {to: "TIMESTAMP"},
 	"DATETIME":      {to: "TIMESTAMP"},
 	"TIMESTAMP":     {to: "TIMESTAMP"},
