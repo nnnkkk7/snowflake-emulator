@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.10](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.9...v0.0.10) - 2026-10-17
+- fix(deps): update go dependencies (non-major) by @renovate[bot] in https://github.com/nnnkkk7/snowflake-emulator/pull/52
+- feat: translate Snowflake data types to DuckDB types by @roend83 in https://github.com/nnnkkk7/snowflake-emulator/pull/46
+- fix: apply gosnowflake bindings in query protocol handler by @hugosacramento in https://github.com/nnnkkk7/snowflake-emulator/pull/53
+
 ## [v0.0.9](https://github.com/nnnkkk7/snowflake-emulator/compare/v0.0.8...v0.0.9) - 2026-01-19
 - chore: fix tagpr config by @nnnkkk7 in https://github.com/nnnkkk7/snowflake-emulator/pull/43
 
