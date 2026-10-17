@@ -148,6 +148,22 @@ linters:
       - path: pkg/types/
         linters:
           - goconst
+      # DuckDB/Snowflake type-name and SQL keyword switches repeat string literals by nature
+      - path: pkg/query/(type_mapper|executor|copy_processor)\.go
+        linters:
+          - goconst
+      # Column type literals mirror pkg/query's type mapping switches
+      - path: pkg/contentdata/repository\.go
+        linters:
+          - goconst
+      # Warehouse size labels are intentionally inline string literals
+      - path: pkg/warehouse/manager\.go
+        linters:
+          - goconst
+      # Warehouse/table type labels in API responses repeat string literals
+      - path: server/handlers/rest_api_v2\.go
+        linters:
+          - goconst
       # Server types package - "types" is a conventional name for API type definitions
       - path: server/types/
         linters:

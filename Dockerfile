@@ -7,7 +7,7 @@
 # Stage 1: Build
 # Note: Do NOT use --platform=$BUILDPLATFORM here
 # CGO requires native compilation, QEMU will emulate the target platform
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /src
 
