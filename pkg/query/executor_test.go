@@ -775,6 +775,66 @@ func TestExecutor_ApplyBindings(t *testing.T) {
 			expected: "SELECT * FROM t WHERE a = 'foo' AND b = 2",
 		},
 		{
+			name: "ValueContainingPlaceholder",
+			sql:  "SELECT :1 AS a, :2 AS b",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "x"},
+				"2": {Type: "TEXT", Value: "10:15"},
+			},
+			expected: "SELECT 'x' AS a, '10:15' AS b",
+		},
+		{
+			name: "ValueNotInterpretedAsSQL",
+			sql:  "SELECT :v1 AS a, :v2 AS b",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: ") OR 1=1 --"},
+				"2": {Type: "TEXT", Value: "a:v1b"},
+			},
+			expected: "SELECT ') OR 1=1 --' AS a, 'a:v1b' AS b",
+		},
+		{
+			name: "QuestionMarkInValue",
+			sql:  "SELECT ? AS a, ? AS b",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "what?"},
+				"2": {Type: "TEXT", Value: "y"},
+			},
+			expected: "SELECT 'what?' AS a, 'y' AS b",
+		},
+		{
+			name: "PlaceholdersInLiteralsAndComments",
+			sql:  "SELECT ':1', '?', \":1\", :1 /* :1 ? */ -- ?",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "TEXT", Value: "x"},
+			},
+			expected: "SELECT ':1', '?', \":1\", 'x' /* :1 ? */ -- ?",
+		},
+		{
+			name: "CastIsNotPlaceholder",
+			sql:  "SELECT :1::INTEGER, ?::VARCHAR",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "FIXED", Value: "5"},
+			},
+			expected: "SELECT 5::INTEGER, 5::VARCHAR",
+		},
+		{
+			name: "UnboundPlaceholderKept",
+			sql:  "SELECT :1, :10",
+			bindings: map[string]*QueryBindingValue{
+				"1": {Type: "FIXED", Value: "1"},
+			},
+			expected: "SELECT 1, :10",
+		},
+		{
+			name: "DuplicateKeys",
+			sql:  "SELECT :1",
+			bindings: map[string]*QueryBindingValue{
+				"1":  {Type: "TEXT", Value: "a"},
+				"v1": {Type: "TEXT", Value: "b"},
+			},
+			wantErr: true,
+		},
+		{
 			name: "NamedKeyNotSupported",
 			sql:  "SELECT :name",
 			bindings: map[string]*QueryBindingValue{

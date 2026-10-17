@@ -491,6 +491,24 @@ func TestQueryHandler_ExecuteQueryWithBindings(t *testing.T) {
 			},
 		},
 		{
+			name: "ValueContainingPlaceholder",
+			request: types.QueryRequest{
+				SQLText: "SELECT :1 AS a, :2 AS b",
+				Bindings: map[string]interface{}{
+					"1": map[string]interface{}{"type": "TEXT", "value": "x"},
+					"2": map[string]interface{}{"type": "TEXT", "value": "10:15"},
+				},
+			},
+			checkResponse: func(t *testing.T, resp *types.QueryResponse) {
+				if !resp.Success {
+					t.Fatalf("Expected success, got: %s", resp.Message)
+				}
+				if len(resp.Data.RowSet) != 1 || resp.Data.RowSet[0][1] != "10:15" {
+					t.Errorf("Expected second column '10:15', got %v", resp.Data.RowSet)
+				}
+			},
+		},
+		{
 			name: "NullValue",
 			request: types.QueryRequest{
 				SQLText: "SELECT :1 IS NULL AS is_null",

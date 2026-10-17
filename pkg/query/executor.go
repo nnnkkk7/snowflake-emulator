@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -146,45 +145,62 @@ func (e *Executor) QueryWithBindings(ctx context.Context, sql string, bindings m
 	return e.Query(ctx, boundSQL)
 }
 
-// applyBindings replaces :N placeholders with actual values from bindings.
-// Snowflake uses :1, :2, etc. for positional parameters. Some drivers (e.g. the Node.js
-// snowflake-sdk) send :v1, :v2, etc. instead, and binding keys may use the same "v" prefix.
+// applyBindings replaces :N and ? placeholders with actual values from bindings.
+// Snowflake uses :1, :2, etc. (or ?) for positional parameters. Some clients send :v1, :v2, etc.
+// instead, and binding keys may use the same "v" prefix.
+// The SQL is scanned once, so placeholders inside string literals, quoted identifiers and
+// comments are left untouched, and bound values are never scanned for placeholders again.
 func (e *Executor) applyBindings(sql string, bindings map[string]*QueryBindingValue) (string, error) {
-	// Normalize keys ("v1" → "1") and sort them in descending order to avoid :1 replacing :10, :11, etc.
-	normalized := make(map[string]*QueryBindingValue, len(bindings))
-	keys := make([]int, 0, len(bindings))
+	// Normalize keys ("v1" → "1") and format each value once
+	values := make(map[int]string, len(bindings))
+	seen := make(map[int]bool, len(bindings))
 	for k, binding := range bindings {
 		pos, err := strconv.Atoi(normalizeBindingKey(k))
 		if err != nil {
 			return "", fmt.Errorf("invalid binding key %q: must be a number", k)
 		}
-		normalized[strconv.Itoa(pos)] = binding
-		keys = append(keys, pos)
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(keys)))
+		if seen[pos] {
+			return "", fmt.Errorf("duplicate binding key %q", k)
+		}
+		seen[pos] = true
 
-	result := sql
-	for _, pos := range keys {
-		key := strconv.Itoa(pos)
-		binding := normalized[key]
 		if binding == nil {
 			continue
 		}
-
 		value, err := formatBindingValue(binding)
 		if err != nil {
-			return "", fmt.Errorf("error formatting binding %s: %w", key, err)
+			return "", fmt.Errorf("error formatting binding %s: %w", k, err)
 		}
-
-		for _, placeholder := range []string{":" + key, ":v" + key, ":V" + key} {
-			result = strings.ReplaceAll(result, placeholder, value)
-		}
+		values[pos] = value
 	}
 
-	// Also handle ? placeholders (positional, 1-based)
-	result = e.replaceQuestionMarkPlaceholders(result, normalized)
+	toks := tokenizeSQL(sql)
+	var b strings.Builder
+	b.Grow(len(sql))
+	questionMarks := 0
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
+		switch {
+		case tok.kind == tokPunct && tok.text == "?":
+			// ? placeholders are positional (1-based)
+			questionMarks++
+			if value, ok := values[questionMarks]; ok {
+				b.WriteString(value)
+				continue
+			}
+		case tok.kind == tokPunct && tok.text == ":" && i+1 < len(toks):
+			if pos, ok := bindingPosition(toks[i+1]); ok {
+				if value, ok := values[pos]; ok {
+					b.WriteString(value)
+					i++ // skip the position token
+					continue
+				}
+			}
+		}
+		b.WriteString(tok.text)
+	}
 
-	return result, nil
+	return b.String(), nil
 }
 
 // normalizeBindingKey strips the optional "v" prefix from a binding key ("v1" → "1").
@@ -192,35 +208,25 @@ func normalizeBindingKey(key string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(key, "v"), "V")
 }
 
-// replaceQuestionMarkPlaceholders replaces ? placeholders with binding values.
-func (e *Executor) replaceQuestionMarkPlaceholders(sql string, bindings map[string]*QueryBindingValue) string {
-	// Find all ? placeholders
-	re := regexp.MustCompile(`\?`)
-	matches := re.FindAllStringIndex(sql, -1)
-	if len(matches) == 0 {
-		return sql
+// bindingPosition returns the position of the token following ':' in a :N or :vN placeholder.
+func bindingPosition(tok sqlToken) (int, bool) {
+	if tok.kind != tokNumber && tok.kind != tokWord {
+		return 0, false
 	}
-
-	// Replace from end to start to preserve indices
-	result := sql
-	for i := len(matches) - 1; i >= 0; i-- {
-		key := strconv.Itoa(i + 1) // 1-based
-		binding := bindings[key]
-		if binding == nil {
-			continue
+	text := tok.text
+	if tok.kind == tokWord {
+		if len(text) < 2 || (text[0] != 'v' && text[0] != 'V') {
+			return 0, false
 		}
-
-		value, err := formatBindingValue(binding)
-		if err != nil {
-			continue // Skip on error
-		}
-
-		start := matches[i][0]
-		end := matches[i][1]
-		result = result[:start] + value + result[end:]
+		text = text[1:]
 	}
-
-	return result
+	for _, c := range text {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	pos, err := strconv.Atoi(text)
+	return pos, err == nil
 }
 
 // formatBindingValue formats a binding value for SQL substitution.
