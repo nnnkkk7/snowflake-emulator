@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -100,7 +101,7 @@ func (h *RestAPIv2Handler) SubmitStatement(w http.ResponseWriter, r *http.Reques
 			CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusUnprocessableEntity)
 		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
@@ -198,7 +199,8 @@ func (h *RestAPIv2Handler) CancelStatement(w http.ResponseWriter, r *http.Reques
 
 // buildExecResponse builds a success response from a DDL/DML execution result.
 func (h *RestAPIv2Handler) buildExecResponse(stmt *query.Statement, execResult *query.ExecResult) types.StatementResponse {
-	// For DDL/DML, we return a minimal response with rows affected
+	// For DDL/DML, we return a single-row result set with the number of rows affected
+	rowsAffected := strconv.FormatInt(execResult.RowsAffected, 10)
 	return types.StatementResponse{
 		StatementHandle:    stmt.Handle,
 		Code:               types.ResponseCodeSuccess,
@@ -206,16 +208,17 @@ func (h *RestAPIv2Handler) buildExecResponse(stmt *query.Statement, execResult *
 		StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
 		CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		ResultSetMetaData: &types.ResultSetMetaData{
-			NumRows: execResult.RowsAffected,
+			NumRows: 1,
 			Format:  "jsonv2",
 			RowType: []types.RowTypeField{
 				{
 					Name: "number of rows affected",
-					Type: "FIXED",
+					Type: sqlAPITypeFixed,
 				},
 			},
+			PartitionInfo: []types.PartitionInfo{{RowCount: 1, UncompressedSize: int64(len(rowsAffected))}},
 		},
-		Data: [][]interface{}{{execResult.RowsAffected}},
+		Data: &[][]interface{}{{rowsAffected}},
 	}
 }
 
@@ -226,7 +229,7 @@ func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result 
 	for i, col := range result.ColumnTypes {
 		rowType[i] = types.RowTypeField{
 			Name:      col.Name,
-			Type:      col.Type,
+			Type:      sqlAPIType(col.Type),
 			Length:    col.Length,
 			Precision: col.Precision,
 			Scale:     col.Scale,
@@ -234,9 +237,19 @@ func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result 
 		}
 	}
 
-	// Convert data to interface{} slice
+	// The SQL API serializes every cell as a string (or null); see sqlapi_format.go.
 	data := make([][]interface{}, len(result.Rows))
-	copy(data, result.Rows)
+	size := int64(0)
+	for i, row := range result.Rows {
+		cells := make([]interface{}, len(row))
+		for j, v := range row {
+			cells[j] = sqlAPICell(rowType[j].Type, v)
+			if s, ok := cells[j].(string); ok {
+				size += int64(len(s))
+			}
+		}
+		data[i] = cells
+	}
 
 	return types.StatementResponse{
 		StatementHandle:    stmt.Handle,
@@ -245,11 +258,12 @@ func (h *RestAPIv2Handler) buildStatementResponse(stmt *query.Statement, result 
 		StatementStatusURL: "/api/v2/statements/" + stmt.Handle,
 		CreatedOn:          stmt.CreatedOn.UnixMilli(),
 		ResultSetMetaData: &types.ResultSetMetaData{
-			NumRows: int64(len(result.Rows)),
-			Format:  "jsonv2",
-			RowType: rowType,
+			NumRows:       int64(len(result.Rows)),
+			Format:        "jsonv2",
+			RowType:       rowType,
+			PartitionInfo: []types.PartitionInfo{{RowCount: int64(len(result.Rows)), UncompressedSize: size}},
 		},
-		Data: data,
+		Data: &data,
 	}
 }
 

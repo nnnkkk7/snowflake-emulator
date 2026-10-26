@@ -25,7 +25,7 @@ type BindingValue struct {
 // StatementResponse represents the response from statement operations.
 type StatementResponse struct {
 	ResultSetMetaData  *ResultSetMetaData `json:"resultSetMetaData,omitempty"`
-	Data               [][]interface{}    `json:"data,omitempty"`
+	Data               *[][]interface{}   `json:"data,omitempty"` // pointer: nil for errors, &[] for an empty result set
 	Code               string             `json:"code"`
 	StatementStatusURL string             `json:"statementStatusUrl,omitempty"`
 	RequestID          string             `json:"requestId,omitempty"`
@@ -33,6 +33,14 @@ type StatementResponse struct {
 	StatementHandle    string             `json:"statementHandle"`
 	Message            string             `json:"message,omitempty"`
 	CreatedOn          int64              `json:"createdOn,omitempty"`
+}
+
+// Rows returns the result rows, or nil when the response carries no data (e.g. an error response).
+func (r *StatementResponse) Rows() [][]interface{} {
+	if r.Data == nil {
+		return nil
+	}
+	return *r.Data
 }
 
 // ResultSetMetaData contains metadata about the result set.

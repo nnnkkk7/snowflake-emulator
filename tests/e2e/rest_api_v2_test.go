@@ -1128,8 +1128,8 @@ func TestRESTAPIV2_MergeStatement(t *testing.T) {
 	}
 
 	// Verify row count
-	if len(resp.Data) != 3 {
-		t.Errorf("Expected 3 rows after MERGE, got %d", len(resp.Data))
+	if len(resp.Rows()) != 3 {
+		t.Errorf("Expected 3 rows after MERGE, got %d", len(resp.Rows()))
 	}
 
 	// Verify data
@@ -1144,10 +1144,10 @@ func TestRESTAPIV2_MergeStatement(t *testing.T) {
 	}
 
 	for i, exp := range expected {
-		if i >= len(resp.Data) {
+		if i >= len(resp.Rows()) {
 			break
 		}
-		row := resp.Data[i]
+		row := resp.Rows()[i]
 		if len(row) < 3 {
 			t.Errorf("Row %d: expected 3 columns, got %d", i, len(row))
 			continue
@@ -1237,8 +1237,8 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 		if resp.Code != types.ResponseCodeSuccess {
 			t.Fatalf("SELECT failed: %s - %s", resp.Code, resp.Message)
 		}
-		if len(resp.Data) != 3 {
-			t.Errorf("Expected 3 rows, got %d", len(resp.Data))
+		if len(resp.Rows()) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(resp.Rows()))
 		}
 		t.Log("Query_SELECT: OK")
 	})
@@ -1249,16 +1249,16 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 		if resp.Code != types.ResponseCodeSuccess {
 			t.Fatalf("IFF query failed: %s - %s", resp.Code, resp.Message)
 		}
-		if len(resp.Data) != 3 {
-			t.Errorf("Expected 3 rows, got %d", len(resp.Data))
+		if len(resp.Rows()) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(resp.Rows()))
 		}
 		// Verify translation worked: Alice (100.5) -> LOW, Bob (200.0) -> HIGH
-		if len(resp.Data) >= 2 {
-			row1 := resp.Data[0]
+		if len(resp.Rows()) >= 2 {
+			row1 := resp.Rows()[0]
 			if len(row1) >= 2 && interfaceToString(row1[1]) != "LOW" {
 				t.Errorf("Expected 'LOW' for Alice, got %v", row1[1])
 			}
-			row2 := resp.Data[1]
+			row2 := resp.Rows()[1]
 			if len(row2) >= 2 && interfaceToString(row2[1]) != "HIGH" {
 				t.Errorf("Expected 'HIGH' for Bob, got %v", row2[1])
 			}
@@ -1274,9 +1274,9 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 		if resp.Code != types.ResponseCodeSuccess {
 			t.Fatalf("NVL query failed: %s - %s", resp.Code, resp.Message)
 		}
-		if len(resp.Data) > 0 && len(resp.Data[0]) > 1 {
-			if interfaceToString(resp.Data[0][1]) != "Unknown" {
-				t.Errorf("Expected 'Unknown', got %v", resp.Data[0][1])
+		if len(resp.Rows()) > 0 && len(resp.Rows()[0]) > 1 {
+			if interfaceToString(resp.Rows()[0][1]) != "Unknown" {
+				t.Errorf("Expected 'Unknown', got %v", resp.Rows()[0][1])
 			}
 		}
 		t.Log("Query_NVL_Translation: OK")
@@ -1290,8 +1290,8 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 		}
 		// Verify update
 		verifyResp := executeStatement("SELECT value FROM ops_test WHERE id = 1")
-		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
-			val := interfaceToString(verifyResp.Data[0][0])
+		if len(verifyResp.Rows()) > 0 && len(verifyResp.Rows()[0]) > 0 {
+			val := interfaceToString(verifyResp.Rows()[0][0])
 			if val != "999" && val != "999.0" {
 				t.Errorf("Expected value 999, got %v", val)
 			}
@@ -1307,8 +1307,8 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 		}
 		// Verify deletion
 		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 4")
-		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
-			if interfaceToString(verifyResp.Data[0][0]) != "0" {
+		if len(verifyResp.Rows()) > 0 && len(verifyResp.Rows()[0]) > 0 {
+			if interfaceToString(verifyResp.Rows()[0][0]) != "0" {
 				t.Error("Expected row to be deleted")
 			}
 		}
@@ -1337,8 +1337,8 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 
 		// Verify committed
 		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 5")
-		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
-			if interfaceToString(verifyResp.Data[0][0]) != "1" {
+		if len(verifyResp.Rows()) > 0 && len(verifyResp.Rows()[0]) > 0 {
+			if interfaceToString(verifyResp.Rows()[0][0]) != "1" {
 				t.Error("Expected row to be committed")
 			}
 		}
@@ -1367,8 +1367,8 @@ func TestRESTAPIV2_AllSQLOperations(t *testing.T) {
 
 		// Verify rolled back
 		verifyResp := executeStatement("SELECT COUNT(*) FROM ops_test WHERE id = 99")
-		if len(verifyResp.Data) > 0 && len(verifyResp.Data[0]) > 0 {
-			if interfaceToString(verifyResp.Data[0][0]) != "0" {
+		if len(verifyResp.Rows()) > 0 && len(verifyResp.Rows()[0]) > 0 {
+			if interfaceToString(verifyResp.Rows()[0][0]) != "0" {
 				t.Error("Expected row to be rolled back")
 			}
 		}

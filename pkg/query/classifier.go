@@ -42,7 +42,7 @@ type ClassifyResult struct {
 
 // Classify analyzes a SQL statement and returns its classification.
 func (c *Classifier) Classify(sql string) ClassifyResult {
-	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
+	upperSQL := strings.ToUpper(stripLeadingComments(sql))
 
 	// Check for query statements
 	if c.isQueryStatement(upperSQL) {
@@ -132,6 +132,8 @@ func (c *Classifier) Classify(sql string) ClassifyResult {
 // isQueryStatement checks if the SQL is a query (read-only) statement.
 func (c *Classifier) isQueryStatement(upperSQL string) bool {
 	return strings.HasPrefix(upperSQL, "SELECT") ||
+		strings.HasPrefix(upperSQL, "WITH") ||
+		strings.HasPrefix(upperSQL, "(") ||
 		strings.HasPrefix(upperSQL, "SHOW") ||
 		strings.HasPrefix(upperSQL, "DESCRIBE") ||
 		strings.HasPrefix(upperSQL, "DESC") ||
@@ -230,4 +232,28 @@ func IsCommit(sql string) bool {
 func IsRollback(sql string) bool {
 	upperSQL := strings.ToUpper(strings.TrimSpace(sql))
 	return strings.HasPrefix(upperSQL, "ROLLBACK")
+}
+
+// stripLeadingComments removes leading whitespace, block comments and line comments so that
+// a statement tagged with a comment (as many clients do) is classified by its first keyword.
+func stripLeadingComments(sql string) string {
+	s := strings.TrimSpace(sql)
+	for {
+		switch {
+		case strings.HasPrefix(s, "/*"):
+			end := strings.Index(s, "*/")
+			if end < 0 {
+				return s
+			}
+			s = strings.TrimSpace(s[end+2:])
+		case strings.HasPrefix(s, "--"):
+			end := strings.IndexByte(s, '\n')
+			if end < 0 {
+				return ""
+			}
+			s = strings.TrimSpace(s[end+1:])
+		default:
+			return s
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestRestAPIv2Handler_SubmitStatement_Sync(t *testing.T) {
 		t.Error("Expected ResultSetMetaData to be set")
 	}
 
-	if resp.Data == nil || len(resp.Data) == 0 {
+	if len(resp.Rows()) == 0 {
 		t.Error("Expected data to be returned")
 	}
 }
@@ -137,14 +138,14 @@ func TestRestAPIv2Handler_SubmitStatement_WithBindings(t *testing.T) {
 		t.Errorf("Expected code %s, got %s. Message: %s", types.ResponseCodeSuccess, resp.Code, resp.Message)
 	}
 
-	if resp.Data == nil || len(resp.Data) == 0 {
+	if len(resp.Rows()) == 0 {
 		t.Error("Expected data to be returned")
 		return
 	}
 
 	// Check that the values are correct
-	if len(resp.Data[0]) != 2 {
-		t.Errorf("Expected 2 columns, got %d", len(resp.Data[0]))
+	if len(resp.Rows()[0]) != 2 {
+		t.Errorf("Expected 2 columns, got %d", len(resp.Rows()[0]))
 	}
 }
 
@@ -320,5 +321,141 @@ func TestRestAPIv2Handler_InvalidJSON(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestRestAPIv2Handler_SubmitStatement_ResultShapeMatchesSQLAPI(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
+
+	submit := func(statement string) (int, map[string]interface{}) {
+		t.Helper()
+		body, _ := json.Marshal(types.SubmitStatementRequest{Statement: statement})
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/statements", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+		return rr.Code, resp
+	}
+
+	code, resp := submit("SELECT 1 AS n, 'a' AS s, 1.5::DOUBLE AS f, true AS b, DATE '2024-01-15' AS d, " +
+		"TIMESTAMP '2024-01-15 14:30:00' AS ts, NULL::VARCHAR AS v")
+	if code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %v", http.StatusOK, code, resp)
+	}
+
+	meta := resp["resultSetMetaData"].(map[string]interface{})
+	rowType := meta["rowType"].([]interface{})
+	wantTypes := []string{"fixed", "text", "real", "boolean", "date", "timestamp_ntz", "text"}
+	for i, want := range wantTypes {
+		if got := rowType[i].(map[string]interface{})["type"]; got != want {
+			t.Errorf("rowType[%d].type = %v, want %q", i, got, want)
+		}
+	}
+
+	partitions := meta["partitionInfo"].([]interface{})
+	if len(partitions) != 1 || partitions[0].(map[string]interface{})["rowCount"] != float64(1) {
+		t.Errorf("partitionInfo = %v, want one partition with rowCount 1", partitions)
+	}
+
+	row := resp["data"].([]interface{})[0].([]interface{})
+	wantCells := []interface{}{"1", "a", "1.5", strconv.FormatBool(true), "19737", "2024-01-15 14:30:00.000", nil}
+	for i, want := range wantCells {
+		if row[i] != want {
+			t.Errorf("data[0][%d] = %#v, want %#v", i, row[i], want)
+		}
+	}
+
+	if code, _ = submit("CREATE TABLE shape_t (id INTEGER)"); code != http.StatusOK {
+		t.Fatalf("CREATE TABLE failed with status %d", code)
+	}
+	_, resp = submit("INSERT INTO shape_t VALUES (1), (2)")
+	meta = resp["resultSetMetaData"].(map[string]interface{})
+	rowType = meta["rowType"].([]interface{})
+	if got := rowType[0].(map[string]interface{})["type"]; got != "fixed" {
+		t.Errorf("DML rowType[0].type = %v, want %q", got, "fixed")
+	}
+	if meta["numRows"] != float64(1) {
+		t.Errorf("DML numRows = %v, want 1", meta["numRows"])
+	}
+	partitions = meta["partitionInfo"].([]interface{})
+	if len(partitions) != 1 || partitions[0].(map[string]interface{})["rowCount"] != float64(1) {
+		t.Errorf("DML partitionInfo = %v, want one partition with rowCount 1", partitions)
+	}
+	if got := resp["data"].([]interface{})[0].([]interface{})[0]; got != "2" {
+		t.Errorf("DML data[0][0] = %#v, want %q", got, "2")
+	}
+}
+
+func TestRestAPIv2Handler_SubmitStatement_ExecutionErrorReturns422(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
+
+	body, _ := json.Marshal(types.SubmitStatementRequest{Statement: "SELECT * FROM no_such_table"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/statements", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusUnprocessableEntity, rr.Code, rr.Body.String())
+	}
+
+	var resp types.StatementResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if resp.SQLState != types.SQLState42000 {
+		t.Errorf("Expected SQLState %s, got %s", types.SQLState42000, resp.SQLState)
+	}
+	if resp.Message == "" {
+		t.Error("Expected error message to be set")
+	}
+	if resp.StatementHandle == "" {
+		t.Error("Expected statement handle to be set")
+	}
+}
+
+func TestRestAPIv2Handler_SubmitStatement_EmptyResultHasDataArray(t *testing.T) {
+	_, router := setupRestAPIv2Handler(t)
+
+	submit := func(statement string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(types.SubmitStatementRequest{Statement: statement})
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/statements", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := submit("CREATE TABLE empty_t (id INTEGER)"); rr.Code != http.StatusOK {
+		t.Fatalf("CREATE TABLE failed with status %d", rr.Code)
+	}
+
+	rr := submit("SELECT id FROM empty_t")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"data":[]`) {
+		t.Errorf("Expected an empty data array in the body, got: %s", rr.Body.String())
+	}
+
+	var resp types.StatementResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if resp.Data == nil || len(resp.Rows()) != 0 {
+		t.Errorf("Expected Data to be an empty slice, got %#v", resp.Data)
+	}
+
+	rr = submit("SELECT * FROM no_such_table")
+	if strings.Contains(rr.Body.String(), `"data"`) {
+		t.Errorf("Expected no data field in an error response, got: %s", rr.Body.String())
 	}
 }
